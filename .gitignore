@@ -1,5 +1,14 @@
 
 # Compiled C files
+/game
+/blitz_mode
+/classic_mode
+/main
+/session
+/word_bank
+/client
+/server
+
 *.o
 *.out
 *.exe
