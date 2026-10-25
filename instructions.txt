@@ -12,9 +12,9 @@ chainlink/
 │   ├── server.c               
 │   └── client.c           
 └── client/
-    ├── main.cpp            # starts server, accepts 2 clients, runs a match
-    ├── session.h / .cpp    # game master: coin flip, mode + list-source choice, broadcasts
-    ├── game.h / .cpp       # core logic: Player, chain, turn switching, hints, win check
+    ├── main.cpp                # starts server, accepts 2 clients, runs a match
+    ├── session.h / .cpp        # game master: coin flip, mode + list-source choice, broadcasts
+    ├── game.h / .cpp           # core logic: Player, chain, turn switching, hints, win check
     ├── classic_mode.h / .cpp   # Classic rules (turn ends on wrong guess)
     ├── blitz_mode.h / .cpp     # Chain Blitz rules (30s timer per player, most words wins)
-    └── word_bank.h / .cpp  # loads chains.txt, picks a random chain, validates player-made lists
+    └── word_bank.h / .cpp      # loads chains.txt, picks a random chain, validates player-made lists
