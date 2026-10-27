@@ -1,10 +1,11 @@
 // Chain Blitz rules (30s timer per player, most words wins)
 // No game logic first
 // Only establishes the rules
+
 #include <iostream>
 #include <chrono>
-#include "game.h"
-#include "session.h"
+#include "../client/game.h"
+#include "../client/session.h"
 using namespace std;
 
 class BlitzMode : public Mode { // Inherits all public methods of Mode
@@ -41,15 +42,10 @@ class BlitzMode : public Mode { // Inherits all public methods of Mode
         // determines if the player guess is correct        
         Result on_guess(int player, string word) {
             if (active != firstPlayer) || (isRunning == false) {
-                return IGNORED;
+                return -1;
             }
             
-            if (&game == word) {
-                // Correct
-            }
-            else {
-                // Wrong
-            }
+            
 
         }       
         
