@@ -1,0 +1,60 @@
+COPY THIS MAIN FUNCTION IN GAME.CPP TO TEST 
+ALL TEST PASSED MUST BE PRINTED AND NOT ABORT
+
+int main () {
+    Game g({"beach", "front", "yard"}, {"sun", "set"});
+
+    // starting view (both players at word 0, hint 0, each with its own chain)
+    assert(g.view(0) == "b____\n_____\n____");
+    assert(g.view(1) == "s__\n___");
+
+    // checkGuess: normalization and wrong answers
+    assert(g.checkGuess(0, "beach"));
+    assert(g.checkGuess(0, "  BEACH "));
+    assert(!g.checkGuess(0, "front"));
+    assert(!g.checkGuess(0, ""));
+    assert(g.checkGuess(1, "sun"));            // player 1 expects from its own chain
+    assert(!g.checkGuess(1, "beach"));
+
+    // addHint reveals one more letter, only for player 0
+    g.addHint(0);
+    assert(g.view(0) == "be___\n_____\n____");
+    assert(g.view(1) == "s__\n___");            // per-player proof
+
+    // advance: guessed word shows in full, hint resets
+    g.advance(0);
+    assert(g.view(0) == "beach\nf____\n____");
+    assert(g.view(1) == "s__\n___");
+    assert(g.getScore(0) == 1);
+    assert(g.getScore(1) == 0);
+    assert(g.checkGuess(0, "front"));          // now expects the 2nd word
+    assert(!g.checkGuess(0, "beach"));
+
+    // finishing the chain
+    g.advance(0);
+    g.advance(0);
+    assert(g.view(0) == "beach\nfront\nyard");
+    assert(g.isFinished(0));
+    assert(!g.checkGuess(0, "anything"));      // no crash for a finished player
+    assert(!g.isFinished(1));
+
+    // chains can have different lengths, so players finish independently
+    g.advance(1);
+    assert(g.view(1) == "sun\ns__");
+    g.advance(1);
+    assert(g.view(1) == "sun\nset");
+    assert(g.isFinished(1));
+
+    // bad inputs
+    try { g.view(2); assert(false); }
+    catch (const invalid_argument&) {}
+
+    try { Game bad(vector<string>{}, vector<string>{"a"}); assert(false); }
+    catch (const invalid_argument&) {}
+
+    try { Game bad(vector<string>{"a"}, vector<string>{}); assert(false); }
+    catch (const invalid_argument&) {}
+
+    cout << "all tests passed\n";
+    return 0;
+}
