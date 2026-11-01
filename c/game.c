@@ -1,86 +1,8 @@
-// #ifdef GAME_RUN_TESTS
-#include <stdio.h>      // I/O
-#include <ctype.h>     // isspace, islower
+#include "game.h"
+
+#include <ctype.h>      // isspace, tolower
 #include <stdlib.h>     // malloc, calloc, free
 #include <string.h>     // strlen, memcpy, memset, strcmp
-#include <stddef.h>     // size_t
-#include <stdbool.h>    // bool, true, false
-#include <assert.h>     // cassert
-
-/*
-    INTERFACE
-*/
-
-// ========== SETUP ==========
-
-// struct Player in C++
-typedef struct {
-    char **chain;           // an array of heaped words
-    size_t chain_len;       // size of chain
-    size_t position;        // index of a word in the chain
-    size_t hint_level;      // letters revealed on a word after some incorrect guesses
-    int score;              // number of correct guesses so far
-} Player;
-
-// private member in Game class
-typedef struct {
-    Player players[2];
-} Game;
-
-// stores all possible status (types of error and ok status)
-typedef enum {
-    GAME_OK = 0,
-    GAME_ERR_EMPTY_CHAIN,
-    GAME_ERR_EMPTY_WORD,
-    GAME_ERR_BAD_PLAYER,
-    GAME_ERR_NOMEM,
-} GameStatus;
-
-// initiaze Game g, chain of player0 and its size, and chain of player1 and its size
-/*
-    const char -> read-only char
-    const char * -> modifiable pointer pointing to read-only characters
-    const char *const -> the pointer only points to the characters of a specific string
-    const char *const *words0 -> modifiable pointer to constant pointers to constant characters.
-*/
-GameStatus game_init(Game *g, const char *const *words0, size_t n0, const char *const *words1, size_t n1);
-
-// free all allocated memory of game_init
-void free_game(Game *g);
-
-
-// ========== READ-ONLY ==========
-
-// initializes Game g, the player, and malloc null-terminated string on success
-GameStatus view_game(const Game *g, int player, char **out);
-
-// asks if game is finished
-bool is_game_finished(const Game *g, int player);
-
-// checks player guess if it matches expected word
-bool check_guess(const Game *g, int player, char *guess);
-
-
-// ========== WRITE ==========
-
-// advance player to next word in chain
-GameStatus advance(Game *g, int player);
-
-// add one to player hint after an incorrect guess
-GameStatus add_hint(Game *g, int player);
-
-
-// ========== RESULT =========
-
-// gets player score
-int get_score(const Game *g, int player);
-
-
-/*
-    IMPLEMENTATION
-*/
-
-// ========== PRIVATE HELPERS (static) =========
 
 // Copy a string onto a heap
 // Why: To give Game g its copy of the word to free later on, and the original string is never touched
@@ -91,7 +13,7 @@ static char *str_dup(const char *s) {
     return copy;
 }
 
-// trim whitespaces from both sides i.e. normalization
+// trim whitespaces from both sides and lowercase i.e. normalization
 static char *normalize(const char *s) {
     const char *start = s;
     while (*start && isspace((unsigned char)*start)) start++;     /* skip leading space */
@@ -108,12 +30,12 @@ static char *normalize(const char *s) {
 }
 
 // check if player is valid
-bool is_player_valid(int player) {
+static bool is_player_valid(int player) {
     return player == 0 || player == 1;
 }
 
-// free player's chain and reset if finished
-void free_chain(Player *p) {
+// free player's chain and reset it to empty
+static void free_chain(Player *p) {
     for (size_t i = 0; i < p->chain_len; i++) free(p->chain[i]);        // loop through the chain and free
     free(p->chain);                                                     // free all leftovers
     
@@ -135,7 +57,7 @@ static GameStatus copy_chain(Player *p, const char *const *words, size_t n) {
     for (size_t i = 0; i < n; i++) {
         p->chain[i] = str_dup(words[i]);
         
-        // if no 
+        // if a copy fails, free the i words already copied and report no memory
         if (!p->chain[i]) {
             p->chain_len = i;
             free_chain(p);
@@ -167,7 +89,7 @@ GameStatus game_init(Game *g, const char *const *words0, size_t n0, const char *
     return GAME_OK;
 }
 
-// reset player and game status 
+// free both players' chains
 void free_game(Game *g) {
     for (int i = 0; i < 2; i++) free_chain(&g->players[i]);
 }
@@ -178,7 +100,7 @@ GameStatus view_game(const Game *g, int player, char **out) {
     const Player *p = &g->players[player];
 
     size_t total = 1;
-    for (int i = 0; i < p->chain_len; i++) total += strlen(p->chain[i]);
+    for (size_t i = 0; i < p->chain_len; i++) total += strlen(p->chain[i]);
     if (p->chain_len > 0) total += p->chain_len - 1;
 
     char *buf = malloc(total);
@@ -208,7 +130,7 @@ bool is_game_finished(const Game *g, int player) {
     return g->players[player].position >= g->players[player].chain_len;
 }
 
-bool check_guess(const Game *g, int player, char *guess) {
+bool check_guess(const Game *g, int player, const char *guess) {
     if (!is_player_valid(player) || guess == NULL) return false;
     if (is_game_finished(g, player)) return false;
 
@@ -229,7 +151,7 @@ GameStatus advance(Game *g, int player) {
 
     p->score++;
     p->position++;
-    p->hint_level=0;
+    p->hint_level = 0;
     return GAME_OK;
 }
 
@@ -245,6 +167,12 @@ int get_score(const Game *g, int player) {
 
     return g->players[player].score;
 }
+
+// ========== TESTS (only compiled with -DGAME_RUN_TESTS) ==========
+#ifdef GAME_RUN_TESTS
+
+#include <stdio.h>      // printf
+#include <assert.h>     // assert
 
 static void expect_view(const Game *g, int player, const char *expected) {
     char *v = NULL;
@@ -307,4 +235,4 @@ int main(void) {
     return 0;
 }
 
-//#endif
+#endif // GAME_RUN_TESTS
