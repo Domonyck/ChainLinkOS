@@ -18,3 +18,15 @@ chainlink/
     ├── classic_mode.h / .cpp   # Classic rules (turn ends on wrong guess)
     ├── blitz_mode.h / .cpp     # Chain Blitz rules (30s timer per player, most words wins)
     └── word_bank.h / .cpp      # loads chains.txt, picks a random chain, validates player-made lists
+
+
+server.c        networking only: socket, bind, listen, accept two players
+   │            then hands both sockets to the session
+   ▼
+session.c       the "game master": asks setup questions, flips the coin,
+   │            relays messages between the two sockets, announces the winner
+   │
+   ├── word_bank.c     loads data/*.json, picks a random chain, validates player lists
+   ├── game.c          the chain, hints, guess checking, scores
+   ├── classic_mode.c  Classic rules: wrong guess ends the turn
+   └── blitz_mode.c    Blitz rules: 30s clock per player
