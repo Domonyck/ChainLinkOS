@@ -1,0 +1,17 @@
+{
+  "chains": [
+    ["fire", "work", "shop", "lift", "off", "shore", "line"],
+    ["sun", "light", "house", "work", "book", "mark", "down"],
+    ["rain", "drop", "out", "side", "walk", "way", "point"],
+    ["snow", "ball", "park", "way", "side", "kick", "back"],
+    ["water", "fall", "back", "pack", "horse", "power", "house"],
+    ["door", "bell", "boy", "friend", "ship", "yard", "stick"],
+    ["moon", "walk", "out", "law", "suit", "case", "book"],
+    ["hand", "shake", "down", "town", "house", "hold", "up"],
+    ["star", "fish", "net", "work", "out", "put", "down"],
+    ["air", "line", "up", "set", "back", "bone", "yard"]
+  ],
+  "word_bank": [
+
+  ]
+}
