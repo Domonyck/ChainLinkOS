@@ -1,20 +1,23 @@
-
-# Compiled C files
-/game
-/blitz_mode
-/classic_mode
-/main
-/session
-/word_bank
-/client
-/server
-
+# Object files and executables
 *.o
 *.out
 *.exe
-
-# Compiled binaries (optional)
 a.out
 
-# Debug files (optional)
+# ChainLinkOS build outputs
+server_app
+client_app
+test_blitz
+
+# Debug files (macOS)
 *.dSYM/
+
+# macOS
+.DS_Store
+
+# Editor settings
+.vscode/
+.idea/
+
+# Logs
+*.log

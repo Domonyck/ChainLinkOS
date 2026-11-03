@@ -1,32 +1,43 @@
-chainlink/
-├── Makefile                # Grouping the codes together
-├── README.md
+ChainLinkOS/
+├── Makefile                     # builds server_app, client_app, test_blitz
+├── README.md                    # (not created yet)
+├── implementation.txt           # build, run and flow guide
+├── instructions.txt             # general idea of the directory and each file relationships
+├── blitz_mode_instructions.txt  # instructions and flow of blitz_mode
 ├── data/
-│   └── classicmode.txt          # pre-made 7-word chains for "game master" lists
-│   └── blitzmode.txt          # pre-made 30-word chains for "game master" lists
-├── common/                 # shared by server and client
-│   ├── protocol.h          # message types/format (e.g. HINT, TURN, GUESS, WIN)
-│   ├── net.h               # C socket API declarations (extern "C" guarded)
-│   └── net.c               # C: socket/bind/listen/accept/connect, send_line, recv_line
-├── server/
-│   ├── server.c               
-│   └── client.c           
-└── client/
-    ├── main.cpp                # starts server, accepts 2 clients, runs a match
-    ├── session.h / .cpp        # game master: coin flip, mode + list-source choice, broadcasts
-    ├── game.h / .cpp           # core logic: Player, chain, turn switching, hints, win check
-    ├── classic_mode.h / .cpp   # Classic rules (turn ends on wrong guess)
-    ├── blitz_mode.h / .cpp     # Chain Blitz rules (30s timer per player, most words wins)
-    └── word_bank.h / .cpp      # loads chains.txt, picks a random chain, validates player-made lists
+│   ├── classicmode.json      # pre-made 7-word chains (game master lists)
+│   └── blitzmode.json        # pre-made Blitz chains (25 words per the rules)
+├── include/                  # every header
+│   ├── game.h                # Player, Game, GameStatus, coin flip
+│   ├── mode.h                # Result + Mode interface (no mode.c)
+│   ├── blitz_mode.h          # Blitz referee: create / destroy
+│   ├── session.h             # the game master's public API
+│   └── word_bank.h           # JSON loader API
+├── src/
+│   ├── game.c                # chain, hints, guess check, scores, view_game, coin flip
+│   ├── session.c             # game master
+├── core/
+│   ├── blitz_mode.c          # Blitz rules: 30 s clock per player, most words wins
+│   ├── classic_mode.c        # Classic rules (not on the Mode interface yet)
+│   └── word_bank.c           # loads data/*.json, picks a random chain
+└── server/
+    ├── server.c              # networking only: socket, bind, listen, accept two players
+    └── client.c              # raw client: connect, print, send
 
 
-server.c        networking only: socket, bind, listen, accept two players
-   │            then hands both sockets to the session
+server.c        networking only: socket, bind, listen, accept two players,
+   │            signal(SIGPIPE, SIG_IGN), srand once, then hands both
+   │            sockets to the session
    ▼
-session.c       the "game master": asks setup questions, flips the coin,
-   │            relays messages between the two sockets, announces the winner
+session.c       the game master: setup questions, coin flip, relays messages
+   │            between the two sockets, reads the clock once per loop,
+   │            announces the winner
    │
-   ├── word_bank.c     loads data/*.json, picks a random chain, validates player lists
-   ├── game.c          the chain, hints, guess checking, scores
-   ├── classic_mode.c  Classic rules: wrong guess ends the turn
-   └── blitz_mode.c    Blitz rules: 30s clock per player
+   ├── word_bank.c     loads data/*.json, picks a random chain,
+   │                   validates player-made lists (Classic)
+   ├── game.c          the chain, hints, guess checking, scores,
+   │                   view_game, coin flip
+   └── mode.h          the contract the session talks through
+        ├── blitz_mode.c     Blitz referee: 30 s clock per player
+        └── classic_mode.c   Classic rules: wrong guess ends the turn
+                             (to be moved onto mode.h)

@@ -1,0 +1,42 @@
+Blitz Gameplay
+
+Setup
+- The player picked Blitz mode.
+- The game master (session.c) provides each player a list of 30 words in the format word1\nword2\n....
+- Each player works through their own list.
+- A coin flip decides which player guesses first (first_player).
+
+Word List Visibility
+- The full list is shown all at once
+- The game master only sends the visible words to each client, so the hidden words cannot be read ahead of time.
+
+Rules
+- Each player has their own 30-second timer. It runs only on their turn and halts on the opponent's turn.
+- Hint level has no cap.
+- Each player's number of correct words is stored.
+- An empty, misspelled, or incomplete guess counts as a wrong guess.
+
+Coin Flip
+- The game master randomly picks one of the two players to make the call.
+- The picked player chooses heads or tails.
+- The game master flips the coin.
+- If the flip matches the player's call, that player is first_player. If it does not match, the other player is first_player.
+- The flip is done once, by the game master, and the result is sent to both clients so they agree on who starts.
+- The coin flip only decides who opens the game. Every turn after that follows the turn rules below.
+
+Step-by-step
+1. The game master prepares the word lists and reveals the player view of the chain.
+2. The game master picks a random player to call heads or tails, flips the coin, and the result determines first_player. The game starts with that player's turn.
+3. The active player guesses the current word on their list.
+4. Correct guess: the player's score goes up by one and the visible window moves forward by one word. They keep the turn.
+5. Wrong guess:
+    - A hint (letter) is appended to their current word.
+    - The turn switches to the other player on both clients.
+    - The wrong player's timer halts, and the other player's timer resumes.
+    - When the turn comes back, the player retries the same word (now with more of it revealed) and their timer resumes from where it stopped, not from 30.
+6. If one player's timer hits zero first, that player is out. The other player keeps playing alone, with their timer still running, until it hits zero or they finish their list.
+
+Ending
+- A player finishes their list: the game stops immediately, results are tallied, and that player wins.
+- Both timers reach zero with no one finished: the player with the most correct words out of 30 wins.
+- Tie: either both finished at the same instant or nobody finished and the scores are equal. Both players win.

@@ -105,6 +105,7 @@ GameStatus view_game(const Game *g, int player, char **out) {
 
     const Player *p = &g->players[player];
 
+    // every letter + one '\n' between words + '\0'
     size_t total = 1;
     for (size_t i = 0; i < p->chain_len; i++) total += strlen(p->chain[i]);
     if (p->chain_len > 0) total += p->chain_len - 1;
@@ -114,29 +115,23 @@ GameStatus view_game(const Game *g, int player, char **out) {
 
     size_t k = 0;
 
-    size_t last = p->position + 1;
-    if (last > p->chain_len - 1) last = p->chain_len - 1;
-
-    for (size_t i = 0; i <= last; i++) {
+    for (size_t i = 0; i < p->chain_len; i++) {
         const char *word = p->chain[i];
         size_t wlen = strlen(word);
-        
+
         for (size_t j = 0; j < wlen; j++) {
-            // Reveal all guessed word
+            // Reveal all guessed words in full
             if (i < p->position) buf[k++] = word[j];
-            
-            // Reveal the current word at hint level
+
+            // Reveal the current word up to the hint level
             else if (i == p->position) buf[k++] = (j <= p->hint_level) ? word[j] : '_';
-            
-            // Reveal the upcoming word
-            else if (i == p->position + 1) buf[k++] = (j == 0) ? word[j] : '_';
-            
-            // Mask the words not guessed yet
-            else buf[k++] = '_';
+
+            // Words not reached yet: first letter only
+            else buf[k++] = (j == 0) ? word[j] : '_';
         }
-        if (i < last) buf[k++] = '\n';
+        if (i + 1 < p->chain_len) buf[k++] = '\n';   // separator, never trailing
     }
-    
+
     buf[k] = '\0';
 
     *out = buf;

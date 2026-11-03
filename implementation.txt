@@ -1,0 +1,236 @@
+CHAINLINK - IMPLEMENTATION GUIDE
+================================
+
+Game: word-chain guessing game (Classic + Chain Blitz), plain C99.
+Layout: one server (the game master) and two client computers.
+Your part: the game logic (game, Blitz referee, coin flip, hints, scoring).
+
+
+1. FOLDER LAYOUT (ChainLinkOS)
+------------------------------
+
+  ChainLinkOS/
+    core/      blitz_mode.c  classic_mode.c  word_bank.c
+    data/      blitzmode.json  classicmode.json
+    include/   blitz_mode.h  game.h  mode.h  session.h  word_bank.h
+    server/    client.c  server.c
+    src/       game.c  main.c  session.c
+    tests/     test_blitz_mode.c  (add your other test files here too)
+    Makefile  .gitignore  instructions.txt  implementation.txt
+
+  Every header lives in include/, so every compile needs -Iinclude.
+  Run the server from the ChainLinkOS ROOT (the folder that contains
+  data/): session.c opens "data/classicmode.json" and
+  "data/blitzmode.json" relative to where the server is started.
+
+
+2. WHAT EACH FILE IS FOR
+------------------------
+
+GAME LOGIC (yours)
+
+  include/game.h + src/game.c
+      The scoreboard and answer key. Holds each player's word chain,
+      position, hint level and score.
+      Functions: game_init, free_game, view_game, check_guess, advance,
+      add_hint, is_game_finished, get_score.
+      Also the coin flip: pick_caller, flip_coin, decide_first_player.
+      Knows nothing about sockets, timers or modes.
+      view_game: guessed words in full, the current word with its hints,
+      every word not reached yet shows its first letter only.
+
+  include/mode.h
+      The contract between the session and any game mode. Types only
+      (Result, ResultKind, Mode), so there is NO mode.c.
+      Mode = a table of function pointers + a private state pointer.
+
+  include/blitz_mode.h + core/blitz_mode.c
+      The Blitz referee. Each player has a 30 s clock that runs only on
+      their turn. A correct guess keeps the turn; a wrong guess adds a
+      hint and passes it. A clock at zero puts that player out and the
+      other plays on alone. It never reads a clock or a socket: the
+      session passes in now_ms.
+
+  core/classic_mode.c
+      The Classic rules. NOT on the Mode interface yet.
+
+  tests/test_blitz_mode.c
+      Tests for the Blitz referee (fake time, no sleeping). Not part of
+      the game; only used to check it.
+
+SERVER SIDE (teammates)
+
+  server/server.c      entry point: opens the port, accepts two players,
+                       runs a Session. Replaces src/main.c.
+  src/session.c + include/session.h
+                       the game master: loads the word chain, owns the match.
+  core/word_bank.c + include/word_bank.h
+                       loads chains from the JSON files in data/.
+  server/client.c      a raw client: connects, prints what the server
+                       sends, sends what you type.
+  data/classicmode.json   Classic chains (10 chains x 7 words)
+  data/blitzmode.json     Blitz chains (3 chains x 25 words)
+  src/main.c           OLD entry point. Do not build it with server.c
+                       (two mains cannot link).
+
+
+3. BUILD AND RUN
+----------------
+
+All commands run from the ChainLinkOS root.
+
+  With the Makefile below:
+      make all           builds server_app and client_app
+      make test_blitz    builds and runs the Blitz tests with sanitizers
+      make clean         removes the built files
+
+  Without make:
+
+      # server
+      gcc -std=c99 -Wall -Wextra -Iinclude -o server_app \
+          server/server.c src/session.c src/game.c \
+          core/blitz_mode.c core/word_bank.c
+
+      # client
+      gcc -Wall -Wextra -o client_app server/client.c
+
+      # Blitz tests (sanitizers catch leaks, bad frees, undefined behaviour)
+      gcc -std=c99 -Wall -Wextra -fsanitize=address,undefined -Iinclude \
+          core/blitz_mode.c src/game.c tests/test_blitz_mode.c -o test_blitz
+      ./test_blitz
+      Expected: all blitz mode tests passed
+
+  Run a match (three terminals, or three computers):
+
+      ./server_app 5000                  # terminal 1: the server
+      ./client_app 127.0.0.1 5000        # terminal 2: player 0
+      ./client_app 127.0.0.1 5000        # terminal 3: player 1
+
+  The first client to connect is player 0, the second is player 1.
+  On three computers use the server computer's LAN IP (for example
+  192.168.1.10) and make sure the port is not blocked by the firewall.
+
+  Always rebuild before running. Running an old binary after an edit is the
+  most common reason a fix "does nothing".
+
+  Current state: the server accepts both players and loads a chain from the
+  word bank. The match loop is NOT wired yet (see section 5 and 6).
+
+  Makefile (save as ChainLinkOS/Makefile; indent recipe lines with a TAB):
+
+      CC      = gcc
+      CFLAGS  = -std=c99 -Wall -Wextra -Iinclude
+      SAN     = -fsanitize=address,undefined
+
+      SERVER_SRC = server/server.c src/session.c src/game.c \
+                   core/blitz_mode.c core/word_bank.c
+
+      all: server_app client_app
+
+      server_app: $(SERVER_SRC)
+      	$(CC) $(CFLAGS) -o $@ $(SERVER_SRC)
+
+      client_app: server/client.c
+      	$(CC) -Wall -Wextra -o $@ server/client.c
+
+      test_blitz: core/blitz_mode.c src/game.c tests/test_blitz_mode.c
+      	$(CC) $(CFLAGS) $(SAN) -o $@ core/blitz_mode.c src/game.c tests/test_blitz_mode.c
+      	./$@
+
+      clean:
+      	rm -f server_app client_app test_blitz
+
+      .PHONY: all test_blitz clean
+
+
+4. NOTE ON TESTS AFTER CHANGING view_game
+-----------------------------------------
+
+  Every word not yet reached shows its first letter, so expected views
+  look like this for {beach, front, yard}:
+      start:            "b____\nf____\ny___"
+      one hint:         "be___\nf____\ny___"
+      one correct:      "beach\nf____\ny___"
+      finished:         "beach\nfront\nyard"
+  On the 4-word test chain, the wrong-guess check is
+      "beach\nfr___\ny___\nw___"
+  Update the expected strings in the tests if they still use the old rule.
+
+
+5. HOW A BLITZ MATCH FLOWS (what the session should do)
+-------------------------------------------------------
+
+  1. server.c accepts two sockets and creates a Session.
+  2. Session loads a 30-word chain for each player (word_bank).
+  3. game_init(&game, chain0, n, chain1, n)
+  4. Coin flip, once, by the game master:
+        caller = pick_caller();           // who calls
+        // the caller's heads/tails choice arrives from that client
+        flip   = flip_coin();
+        first  = decide_first_player(caller, call, flip);
+        // send the result to both clients so they agree
+  5. create_blitz_mode(&mode, &game);
+     mode.start(mode.self, first, now_ms);
+  6. Send each player their view_game(...) output.
+  7. Main loop, until mode.is_over(mode.self):
+        now  = server monotonic clock, read ONCE per loop
+               (clock_gettime(CLOCK_MONOTONIC))
+        wait = mode.ms_until_deadline(mode.self, now)
+        poll(sockets, 2, wait)            // -1 means wait forever
+        guess arrived   -> r = mode.on_guess(mode.self, player, text, now)
+        wait reached 0  -> r = mode.on_timeout(mode.self, now)
+        disconnect      -> r = mode.on_forfeit(mode.self, player, now)
+        broadcast based on r.kind (table below), then send fresh views
+  8. When over: w = mode.winner(mode.self)   (0, 1, or -1 for a tie)
+  9. Cleanup, in this order:
+        destroy_blitz_mode(&mode);        // the mode first, it points at the game
+        free_game(&game);
+
+  Result table
+     RESULT_IGNORED     nothing changed (wrong player, not started, over)
+     RESULT_CORRECT     same player keeps the turn
+     RESULT_WRONG       hint added; r.next_player plays now
+     RESULT_PLAYER_OUT  r.player's clock ran out; r.next_player plays alone
+     RESULT_GAME_OVER   match ended; call winner()
+
+  Rules to remember
+     - The time (now_ms) always comes from the SERVER, never a client.
+     - A guess arriving at or after the deadline is late and not counted.
+     - Never send a real chain to a client, only the output of view_game.
+       view_game returns a malloc'd string: free() it after sending.
+     - signal(SIGPIPE, SIG_IGN) and srand() are called once in server.c.
+
+
+6. KNOWN GAPS / TO-DO
+---------------------
+
+  1. Blitz data: blitzmode.json has 25-word chains (only 3). The rules say
+     30. Either extend the data or change the rule.
+  2. session.c never sets MODE_BLITZ, so it always loads the Classic file.
+  3. session.c does not use game.c / blitz_mode.c yet; the loop in
+     section 5 still has to be written there.
+  4. core/classic_mode.c is not on the Mode interface yet.
+  5. src/main.c is replaced by server/server.c. Keep it out of the build.
+  6. Update the view_game comment in include/game.h to the latest rule.
+  7. advance() does not stop at the end of a chain; always check
+     is_game_finished first (the Blitz referee already does).
+  8. Make sure src/game.c has #include "game.h" (not "../server/game.h"),
+     since the headers now live in include/.
+
+
+7. COMMON ERRORS
+----------------
+
+  "undefined reference to main"     you compiled a file with no main
+                                    (e.g. only game.c). Add the test file
+                                    or server.c.
+  "multiple definition of main"     two files with main (src/main.c and
+                                    server/server.c). Compile only one.
+  "No such file: game.h"            missing -Iinclude.
+  "undefined reference to ..."      a .c file is missing from the command.
+  Server cannot open the data file  you started it from the wrong folder;
+                                    run it from the ChainLinkOS root.
+  Address already in use            an old server still holds the port;
+                                    use another port or wait a minute.
+  "missing separator" in make       Makefile recipe lines must start with
+                                    a TAB, not spaces.
