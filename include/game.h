@@ -70,4 +70,22 @@ GameStatus add_hint(Game *g, int player);
 // gets player score
 int get_score(const Game *g, int player);
 
+// ========== COIN FLIP ==========
+ 
+// the two sides of the coin
+typedef enum { COIN_HEADS, COIN_TAILS } CoinSide;
+ 
+// randomly picks which player (0 or 1) makes the call.
+// Uses rand(): call srand() once at program start, or every run picks the same player.
+int pick_caller(void);
+ 
+// flips the coin: heads or tails.
+// Uses rand(): call srand() once at program start.
+CoinSide flip_coin(void);
+ 
+// decides who goes first: the caller if the call matches the flip, otherwise the other player.
+// Returns 0 or 1, or -1 if caller is not 0 or 1, or call/flip is not a valid side.
+// Pure function: no randomness inside, so it is easy to test.
+int decide_first_player(int caller, CoinSide call, CoinSide flip);
+
 #endif

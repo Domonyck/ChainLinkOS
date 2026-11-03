@@ -1,17 +1,9 @@
-/**
- * @file session.c
- * @brief Implementation of the Session module declared in session.h.
- *
- * Layout of this file:
- *   1. The Session struct (its fields are hidden from every other file)
- *   2. create_session / destroy_session
- *   3. load_chain: picks the JSON file for the mode and a random chain (word_bank.h)
- *   4. run_session (placeholder for now)
- *
- * Why is the struct here and not in session.h? Keeping it out of the header
- * makes Session opaque: main.c can hold a Session * but cannot reach inside,
- * so no outside code can change s->mode or s->fds by accident.
- */
+/*
+It runs one match from start to finish, on the server.
+
+It never decides whether a guess is correct (that’s game.c) or what a wrong guess costs (that’s the mode).
+Right now it only loads a chain and prints it, so most of its job is still to be built.
+*/
 
 #include "session.h"
 #include "word_bank.h"

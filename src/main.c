@@ -1,14 +1,10 @@
-/**
- * @file main.c
- * @brief Entry point of the server.
- *
- * Eventually: accept two clients, build a Session around their sockets, run
- * the match, then clean up. For now the sockets do not exist yet, so it uses
- * -1 as a placeholder for both and just proves create/run/destroy work.
- *
- * Why so little here? main only wires things together. All the game logic
- * lives in the modules it calls.
- */
+/*
+It’s the original program entry point. 
+It created a session with dummy sockets (-1, -1), ran it and destroyed it. It was a placeholder from when sockets didn’t exist yet.
+
+server.c has replaced it: it does the same thing, but with real sockets that wait for two players to connect. 
+A program can only have one main, so main.c should be removed from the build.
+*/
 
 #include "session.h"
 

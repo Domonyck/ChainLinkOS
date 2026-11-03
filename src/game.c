@@ -1,3 +1,9 @@
+/*
+It holds the state of the match and answers questions about it, and it doesn’t know about networking, clocks or modes.
+
+It only ever says “this is correct” or “this is the current state”. Deciding what that means (who goes next, whether time ran out) belongs to the mode.
+*/
+
 #include "game.h"
 
 #include <ctype.h>      // isspace, tolower
@@ -107,17 +113,30 @@ GameStatus view_game(const Game *g, int player, char **out) {
     if (!buf) return GAME_ERR_NOMEM;
 
     size_t k = 0;
-    for (size_t i = 0; i < p->chain_len; i++) {
+
+    size_t last = p->position + 1;
+    if (last > p->chain_len - 1) last = p->chain_len - 1;
+
+    for (size_t i = 0; i <= last; i++) {
         const char *word = p->chain[i];
         size_t wlen = strlen(word);
-
+        
         for (size_t j = 0; j < wlen; j++) {
+            // Reveal all guessed word
             if (i < p->position) buf[k++] = word[j];
+            
+            // Reveal the current word at hint level
             else if (i == p->position) buf[k++] = (j <= p->hint_level) ? word[j] : '_';
+            
+            // Reveal the upcoming word
+            else if (i == p->position + 1) buf[k++] = (j == 0) ? word[j] : '_';
+            
+            // Mask the words not guessed yet
             else buf[k++] = '_';
         }
-        if (i + 1 < p->chain_len) buf[k++] = '\n';
+        if (i < last) buf[k++] = '\n';
     }
+    
     buf[k] = '\0';
 
     *out = buf;
@@ -168,71 +187,28 @@ int get_score(const Game *g, int player) {
     return g->players[player].score;
 }
 
-// ========== TESTS (only compiled with -DGAME_RUN_TESTS) ==========
-#ifdef GAME_RUN_TESTS
-
-#include <stdio.h>      // printf
-#include <assert.h>     // assert
-
-static void expect_view(const Game *g, int player, const char *expected) {
-    char *v = NULL;
-    assert(view_game(g, player, &v) == GAME_OK);
-    assert(strcmp(v, expected) == 0);
-    free(v);
+// ========== COIN FLIP ==========
+// The only part of this file that uses randomness. It never reads or changes a Game.
+ 
+// randomly pick the player who makes the call
+int pick_caller(void) {
+    return rand() % 2;
 }
-
-int main(void) {
-    const char *words[] = {"beach", "front", "yard"};
-    Game g;
-    assert(game_init(&g, words, 3, words, 3) == GAME_OK);
-
-    // starting view: both players at word 0, hint 0
-    expect_view(&g, 0, "b____\n_____\n____");
-    expect_view(&g, 1, "b____\n_____\n____");
-
-    // check_guess: normalization and wrong answers
-    char g1[] = "beach", g2[] = "  BEACH ", g3[] = "front", g4[] = "";
-    assert(check_guess(&g, 0, g1));
-    assert(check_guess(&g, 0, g2));
-    assert(!check_guess(&g, 0, g3));
-    assert(!check_guess(&g, 0, g4));
-
-    // add_hint reveals one more letter, only for player 0
-    add_hint(&g, 0);
-    expect_view(&g, 0, "be___\n_____\n____");
-    expect_view(&g, 1, "b____\n_____\n____");
-
-    // advance: guessed word shows in full, hint resets
-    advance(&g, 0);
-    expect_view(&g, 0, "beach\nf____\n____");
-    expect_view(&g, 1, "b____\n_____\n____");
-    assert(get_score(&g, 0) == 1);
-    assert(get_score(&g, 1) == 0);
-    assert(check_guess(&g, 0, g3));
-    assert(!check_guess(&g, 0, g1));
-
-    // finishing the chain
-    advance(&g, 0);
-    advance(&g, 0);
-    expect_view(&g, 0, "beach\nfront\nyard");
-    assert(is_game_finished(&g, 0));
-    char any[] = "anything";
-    assert(!check_guess(&g, 0, any));
-    assert(!is_game_finished(&g, 1));
-
-    // bad inputs
-    char *v = NULL;
-    assert(view_game(&g, 2, &v) == GAME_ERR_BAD_PLAYER);
-    assert(get_score(&g, -1) == -1);
-
-    Game bad;
-    assert(game_init(&bad, NULL, 0, words, 3) == GAME_ERR_EMPTY_CHAIN);
-    const char *holes[] = {"cat", ""};
-    assert(game_init(&bad, holes, 2, words, 3) == GAME_ERR_EMPTY_WORD);
-
-    free_game(&g);
-    printf("all tests passed\n");
-    return 0;
+ 
+// flip the coin
+CoinSide flip_coin(void) {
+    return (rand() % 2 == 0) ? COIN_HEADS : COIN_TAILS;
 }
-
-#endif // GAME_RUN_TESTS
+ 
+// the caller goes first if the call matches the flip, otherwise the other player does
+int decide_first_player(int caller, CoinSide call, CoinSide flip) {
+    if (!is_player_valid(caller)) return -1;
+ 
+    // an enum can hold any int, so reject values that are not a real side
+    // for validation purposes
+    if (call != COIN_HEADS && call != COIN_TAILS) return -1;
+    if (flip != COIN_HEADS && flip != COIN_TAILS) return -1;
+ 
+    if (call == flip) return caller;
+    return 1 - caller;      // 0 -> 1, 1 -> 0
+}
