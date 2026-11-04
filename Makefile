@@ -36,11 +36,11 @@
 # ============================================================================
 
 # --- Settings ---------------------------------------------------------------
-CC      = gcc                                # the compiler
-CFLAGS  = -std=c99 -Wall -Wextra -Iinclude   # C99, show warnings, find headers in include/
-SAN     = -fsanitize=address,undefined       # catches leaks, bad frees, undefined behaviour
+CC      = gcc
+CFLAGS  = -std=c99 -Wall -Wextra -Iinclude
+SAN     = -fsanitize=address,undefined
 
-SRC     = src                                # folder names, so paths below stay short
+SRC     = src
 CORE    = core
 
 # Every .c file the server needs to link into one program
