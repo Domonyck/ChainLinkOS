@@ -27,7 +27,7 @@ Your part: the game logic (game, Blitz referee, coin flip, hints, scoring).
 2. WHAT EACH FILE IS FOR
 ------------------------
 
-GAME LOGIC (yours)
+GAME LOGIC
 
   include/game.h + src/game.c
       The scoreboard and answer key. Holds each player's word chain,
