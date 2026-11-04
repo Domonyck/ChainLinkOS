@@ -14,7 +14,7 @@ Your part: the game logic (game, Blitz referee, coin flip, hints, scoring).
     data/      blitzmode.json  classicmode.json
     include/   blitz_mode.h  game.h  mode.h  session.h  word_bank.h
     server/    client.c  server.c
-    src/       game.c  main.c  session.c
+    src/       game.c  session.c
     tests/     test_blitz_mode.c  (add your other test files here too)
     Makefile  .gitignore  instructions.txt  implementation.txt
 
@@ -61,7 +61,7 @@ GAME LOGIC (yours)
 SERVER SIDE (teammates)
 
   server/server.c      entry point: opens the port, accepts two players,
-                       runs a Session. Replaces src/main.c.
+                       runs a Session.
   src/session.c + include/session.h
                        the game master: loads the word chain, owns the match.
   core/word_bank.c + include/word_bank.h
@@ -70,8 +70,6 @@ SERVER SIDE (teammates)
                        sends, sends what you type.
   data/classicmode.json   Classic chains (10 chains x 7 words)
   data/blitzmode.json     Blitz chains (3 chains x 25 words)
-  src/main.c           OLD entry point. Do not build it with server.c
-                       (two mains cannot link).
 
 
 3. BUILD AND RUN
@@ -210,7 +208,7 @@ All commands run from the ChainLinkOS root.
   3. session.c does not use game.c / blitz_mode.c yet; the loop in
      section 5 still has to be written there.
   4. core/classic_mode.c is not on the Mode interface yet.
-  5. src/main.c is replaced by server/server.c. Keep it out of the build.
+  5. src/main.c is replaced by server/server.c. It is now removed in the latest repo.
   6. Update the view_game comment in include/game.h to the latest rule.
   7. advance() does not stop at the end of a chain; always check
      is_game_finished first (the Blitz referee already does).
@@ -224,9 +222,6 @@ All commands run from the ChainLinkOS root.
   "undefined reference to main"     you compiled a file with no main
                                     (e.g. only game.c). Add the test file
                                     or server.c.
-  "multiple definition of main"     two files with main (src/main.c and
-                                    server/server.c). Compile only one.
-  "No such file: game.h"            missing -Iinclude.
   "undefined reference to ..."      a .c file is missing from the command.
   Server cannot open the data file  you started it from the wrong folder;
                                     run it from the ChainLinkOS root.
