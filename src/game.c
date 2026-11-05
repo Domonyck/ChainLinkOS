@@ -4,7 +4,7 @@ It holds the state of the match and answers questions about it, and it doesn’t
 It only ever says “this is correct” or “this is the current state”. Deciding what that means (who goes next, whether time ran out) belongs to the mode.
 */
 
-#include "game.h"
+#include "../include/game.h"
 
 #include <ctype.h>      // isspace, tolower
 #include <stdlib.h>     // malloc, calloc, free
@@ -100,36 +100,50 @@ void free_game(Game *g) {
     for (int i = 0; i < 2; i++) free_chain(&g->players[i]);
 }
 
+// Width of the marker column at the start of every line in view_game: "> " or "  "
+#define MARKER_LEN 2
+
 GameStatus view_game(const Game *g, int player, char **out) {
     if (!is_player_valid(player)) return GAME_ERR_BAD_PLAYER;
 
     const Player *p = &g->players[player];
+    if (p->chain_len == 0) return GAME_ERR_EMPTY_CHAIN;   // guard: chain_len - 1 below would wrap around
 
-    // every letter + one '\n' between words + '\0'
+    // sized for the whole chain, which is always enough for the window:
+    // every letter + the 2-character marker on each line + '\n' between lines + '\0'
     size_t total = 1;
-    for (size_t i = 0; i < p->chain_len; i++) total += strlen(p->chain[i]);
-    if (p->chain_len > 0) total += p->chain_len - 1;
+    for (size_t i = 0; i < p->chain_len; i++) total += strlen(p->chain[i]) + MARKER_LEN;
+    total += p->chain_len - 1;
 
     char *buf = malloc(total);
     if (!buf) return GAME_ERR_NOMEM;
 
     size_t k = 0;
 
-    for (size_t i = 0; i < p->chain_len; i++) {
+    // last word shown: the one after the current word, but never past the end
+    size_t last = p->position + 1;
+    if (last > p->chain_len - 1) last = p->chain_len - 1;
+
+    for (size_t i = 0; i <= last; i++) {
         const char *word = p->chain[i];
         size_t wlen = strlen(word);
 
+        // Marker column: an arrow on the word being guessed right now, so the
+        // player can tell it apart from the upcoming word. Other lines get spaces.
+        buf[k++] = (i == p->position) ? '>' : ' ';
+        buf[k++] = ' ';
+
         for (size_t j = 0; j < wlen; j++) {
-            // Reveal all guessed words in full
+            // Guessed words in full
             if (i < p->position) buf[k++] = word[j];
 
-            // Reveal the current word up to the hint level
+            // Current word: first letter plus hints
             else if (i == p->position) buf[k++] = (j <= p->hint_level) ? word[j] : '_';
 
-            // Words not reached yet: first letter only
+            // Upcoming word: first letter only
             else buf[k++] = (j == 0) ? word[j] : '_';
         }
-        if (i + 1 < p->chain_len) buf[k++] = '\n';   // separator, never trailing
+        if (i < last) buf[k++] = '\n';   // separator, never trailing
     }
 
     buf[k] = '\0';
@@ -206,4 +220,15 @@ int decide_first_player(int caller, CoinSide call, CoinSide flip) {
  
     if (call == flip) return caller;
     return 1 - caller;      // 0 -> 1, 1 -> 0
+}
+
+// ========== TURN PROMPT ==========
+// Only text: it never reads or changes a Game. The session sends it after each view.
+
+// tell a player whether it is their turn to type or they have to wait
+const char *turn_prompt(int viewer, int turn_player) {
+    if (!is_player_valid(viewer) || !is_player_valid(turn_player)) return "";
+
+    if (viewer == turn_player) return "\n>>> YOUR TURN <<<\ninput: ";
+    return "\n... waiting for the other player ...\n";
 }

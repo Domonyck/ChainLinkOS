@@ -27,7 +27,7 @@ reads a clock: the session passes in now_ms, the server's monotonic time.
 #include "game.h"
 
 /* Each player's total thinking time in milliseconds. */
-#define BLITZ_TIME_MS 30000LL
+#define BLITZ_TIME_MS 60000LL
 
 /*
 Build a Blitz mode around a Game.

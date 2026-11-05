@@ -70,22 +70,40 @@ GameStatus add_hint(Game *g, int player);
 // gets player score
 int get_score(const Game *g, int player);
 
+
 // ========== COIN FLIP ==========
- 
+
 // the two sides of the coin
 typedef enum { COIN_HEADS, COIN_TAILS } CoinSide;
- 
+
 // randomly picks which player (0 or 1) makes the call.
 // Uses rand(): call srand() once at program start, or every run picks the same player.
 int pick_caller(void);
- 
+
 // flips the coin: heads or tails.
 // Uses rand(): call srand() once at program start.
 CoinSide flip_coin(void);
- 
+
 // decides who goes first: the caller if the call matches the flip, otherwise the other player.
 // Returns 0 or 1, or -1 if caller is not 0 or 1, or call/flip is not a valid side.
 // Pure function: no randomness inside, so it is easy to test.
 int decide_first_player(int caller, CoinSide call, CoinSide flip);
+
+/* ======== TURN PROMPT ======== */
+
+/**
+ * @brief The message to show a player about whose turn it is.
+ *
+ * Send it right after each view_game() output.
+ *   - viewer is the one playing  : ">>> YOUR TURN <<<" and an "input: " prompt
+ *   - viewer is the other player : "... waiting for the other player ..."
+ *   - nobody's turn (turn_player -1) or an invalid viewer: an empty string
+ *
+ * @param viewer       The player who will receive the message (0 or 1).
+ * @param turn_player  Whose turn it is (0 or 1), or -1 if none. Take it from
+ *                     Result.next_player.
+ * @return A string literal. Do not free or modify it.
+ */
+const char *turn_prompt(int viewer, int turn_player);
 
 #endif

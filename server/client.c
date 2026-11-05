@@ -12,6 +12,8 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <signal.h>     /* signal, SIGPIPE */
+#include <time.h>       /* time */
 #include <string.h>
 #include <unistd.h>
 #include <sys/select.h>

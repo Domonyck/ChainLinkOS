@@ -6,16 +6,17 @@
  * a Session (player 0 = first to connect, player 1 = second), runs the match,
  * then cleans up.
  *
- * Compile: gcc -o server server.c session.c
- *          (add game.c / word_bank.c once session.c uses them)
- * Run:     ./server 5000
+ * Compile: make            (builds server_app)
+ * Run:     ./server_app 5000     (from the project root, so data/ is found)
  */
 
-#include "session.h"
+#include "../include/session.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>     /* signal, SIGPIPE */
+#include <time.h>       /* time */
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -43,6 +44,14 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     int port_no = atoi(argv[1]);
+
+    /* A dropped player must not kill the server: ignoring SIGPIPE turns a
+       send() to a closed socket into a normal error the session can handle. */
+    signal(SIGPIPE, SIG_IGN);
+
+    /* Seed the random number generator once, so the coin flip and the random
+       chain pick are different every run. */
+    srand((unsigned) time(NULL));
 
     /* 1. Create a TCP socket. */
     int server_sock = socket(AF_INET, SOCK_STREAM, 0);

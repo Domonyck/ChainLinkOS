@@ -20,8 +20,8 @@
  *   - The Session does NOT own the sockets: it stores their numbers but never
  *     closes them. Whoever accepted the connections closes them.
  *
- * Current status: run_session() is a placeholder that prints the two socket
- * numbers. The real match logic is added step by step.
+ * Current status: run_session() asks player 0 for the mode, then plays a full
+ * Blitz match (coin flip, turns, clocks, results). Classic is not wired yet.
  */
 
 #ifndef SESSION_H
@@ -69,7 +69,9 @@ Session *create_session(int fd0, int fd1);
  *
  * @param s  The session. Does nothing if NULL.
  *
- * Placeholder for now: prints both socket numbers.
+ * Asks player 0 to choose the mode, loads the word chain, and for Blitz runs
+ * the whole match until it ends (a finished list, both clocks out, or a
+ * disconnect). Classic prints "not available yet" for now.
  */
 void run_session(Session *s);
 
