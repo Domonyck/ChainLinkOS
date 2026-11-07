@@ -40,11 +40,14 @@ Ownership: pass the Mode to destroy_blitz_mode() exactly once. Destroy it
 before free_game(), since the mode points at the game.
 */
 bool create_blitz_mode(Mode *mode, Game *game);
-
+int blitz_active_player(const void *self);
+long long get_time_left(const void *self, int player, long long now_ms);
 /*
 Release a mode created by create_blitz_mode(). Safe with NULL and
 safe to call twice. Does not free the Game.
 */
 void destroy_blitz_mode(Mode *m);
+
+
 
 #endif 

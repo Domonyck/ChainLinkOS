@@ -188,7 +188,21 @@ bool create_blitz_mode(Mode *mode, Game *game) {
 
     return true;
 }
+int blitz_active_player(const void *self) {
+    const BlitzState *s = self;
+    if (s == NULL || !s->started || s->over) return -1;
+    return s->active;
+}
 
+long long get_time_left(const void *self, int player, long long now_ms) {
+    const BlitzState *s = self;
+    if (s == NULL || !s->started || s->over) return 0;
+    if (s->active == player) {
+        long long left = s->deadline - now_ms;
+        return left > 0 ? left : 0;
+    }
+    return s->time_left[player];
+}
 void destroy_blitz_mode(Mode *m) {
     if (m == NULL) return;
 

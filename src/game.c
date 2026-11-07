@@ -92,6 +92,12 @@ GameStatus game_init(Game *g, const char *const *words0, size_t n0, const char *
         free_chain(&g->players[0]);                                 // if initialization failed, free player 0 chain; both must be initialized
         return stat;                                                // return the error status
     }
+	for (int i = 0; i < 2; i++) {
+        if (g->players[i].chain_len > 1) {
+            g->players[i].position = 1;  // Start pointing at the 2nd word (index 1)
+            g->players[i].score = 1;     // Give them 1 point for the free first word
+        }
+    }    
     return GAME_OK;
 }
 

@@ -290,19 +290,22 @@ static int coin_flip(Session *s) {
  */
 static void send_views(Session *s, int turn_player, const bool out[2]) {
     for (int p = 0; p < 2; p++) {
-    	send_text(s->fds[p], "\033[2J\033[H");
+        send_text(s->fds[p], "\033[2J\033[H");
         char *view = NULL;
         if (view_game(&s->game, p, &view) == GAME_OK) {
-            send_fmt(s->fds[p], "\nYour chain:\n%s\nScore: %d   Opponent: %d\n",
-                     view, get_score(&s->game, p), get_score(&s->game, 1 - p));
-            free(view);   /* view_game returns a malloc'd string: the caller frees it */
+            long long ms_left = get_time_left(s->referee.self, p, now_ms());
+            int seconds_left = (int)(ms_left / 1000);
+
+            send_fmt(s->fds[p], "\n⏳ Time Left: %ds | Your chain:\n%s\nScore: %d   Opponent: %d\n",
+                     seconds_left, view, get_score(&s->game, p), get_score(&s->game, 1 - p));
+            free(view);   
         }
 
         if (out[p]) send_text(s->fds[p], "\n(your time is up - waiting for the match to end)\n");
         else        send_text(s->fds[p], turn_prompt(p, turn_player));
+        
     }
 }
-
 /** Tell both players what a Result means for them (not used for GAME_OVER). */
 static void announce(Session *s, Result r) {
     int other = 1 - r.player;
@@ -379,7 +382,6 @@ static bool handle_line(Session *s, int player, const char *line, bool out[2]) {
  * guess, a disconnect, or the deadline.
  */
 static void play_blitz(Session *s) {
-    /* Each player gets their own chain. game_init copies the words. */
     if (game_init(&s->game, s->chain, s->chain_len, s->chain1, s->chain1_len) != GAME_OK) {
         fprintf(stderr, "Could not start the game.\n");
         return;
@@ -390,15 +392,15 @@ static void play_blitz(Session *s) {
     }
 
     int first = coin_flip(s);
-    if (first < 0) return;   /* someone left during the coin flip */
+    if (first < 0) return;   
 
     Mode *m = &s->referee;
-    bool out[2] = { false, false };   /* players whose clock ran out */
+    bool out[2] = { false, false };   
 
     m->start(m->self, first, now_ms());
     send_views(s, first, out);
 
-    char inbuf[2][LINE_MAX_LEN];      /* partly received lines, one per player */
+    char inbuf[2][LINE_MAX_LEN];      
     size_t inlen[2] = { 0, 0 };
 
     while (!m->is_over(m->self)) {
@@ -413,44 +415,48 @@ static void play_blitz(Session *s) {
             return;
         }
 
-        /* Nobody sent anything and the deadline arrived: the active clock ran out. */
+        long long current_time = now_ms();
+
+        /* Deadline arrived: active player ran out of time */
         if (ready == 0) {
-            Result r = m->on_timeout(m->self, now_ms());
+            Result r = m->on_timeout(m->self, current_time);
             if (r.kind == RESULT_GAME_OVER) {
                 announce_game_over(s, "Both players ran out of time.");
                 return;
             }
-            if (r.kind == RESULT_PLAYER_OUT) out[r.player] = true;
+            if (r.kind == RESULT_PLAYER_OUT) {
+                out[r.player] = true;
+            }
             announce(s, r);
-            send_views(s, r.next_player, out);
+            send_views(s, blitz_active_player(m->self), out);
             continue;
         }
 
+        /* Player sent input or disconnected */
         for (int p = 0; p < 2; p++) {
             if (!(pfd[p].revents & (POLLIN | POLLHUP | POLLERR))) continue;
 
             ssize_t n = recv(s->fds[p], inbuf[p] + inlen[p], LINE_MAX_LEN - 1 - inlen[p], 0);
-            if (n <= 0) {   /* the player disconnected: the other player wins */
-                m->on_forfeit(m->self, p, now_ms());
+            if (n <= 0) {   
+                m->on_forfeit(m->self, p, current_time);
                 send_fmt(s->fds[1 - p], "\nPlayer %d left the game.\n", p);
                 announce_game_over(s, "A player left the match.");
                 return;
             }
             inlen[p] += (size_t)n;
 
-            /* Take every complete line out of the buffer. */
             char *newline;
             while ((newline = memchr(inbuf[p], '\n', inlen[p])) != NULL) {
                 *newline = '\0';
                 size_t used = (size_t)(newline - inbuf[p]) + 1;
 
-                if (handle_line(s, p, inbuf[p], out)) return;   /* match over */
+                if (handle_line(s, p, inbuf[p], out)) return;   
 
                 memmove(inbuf[p], inbuf[p] + used, inlen[p] - used);
                 inlen[p] -= used;
             }
 
-            if (inlen[p] >= LINE_MAX_LEN - 1) inlen[p] = 0;   /* a line this long is junk: drop it */
+            if (inlen[p] >= LINE_MAX_LEN - 1) inlen[p] = 0;   
         }
     } 
 }
