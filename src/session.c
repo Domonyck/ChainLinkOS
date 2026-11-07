@@ -290,6 +290,7 @@ static int coin_flip(Session *s) {
  */
 static void send_views(Session *s, int turn_player, const bool out[2]) {
     for (int p = 0; p < 2; p++) {
+    	send_text(s->fds[p], "\033[2J\033[H");
         char *view = NULL;
         if (view_game(&s->game, p, &view) == GAME_OK) {
             send_fmt(s->fds[p], "\nYour chain:\n%s\nScore: %d   Opponent: %d\n",
@@ -451,7 +452,7 @@ static void play_blitz(Session *s) {
 
             if (inlen[p] >= LINE_MAX_LEN - 1) inlen[p] = 0;   /* a line this long is junk: drop it */
         }
-    }
+    } 
 }
 
 /* ======== RUNNING ======== */
