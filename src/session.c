@@ -24,7 +24,8 @@
  */
 
 /* Needed for clock_gettime and poll when compiling with -std=c99. */
-#define _POSIX_C_SOURCE 200809L         /* macos / posix compliance */
+#define _POSIX_C_SOURCE 200809L    // macos
+// #define _POSIX_C_SOURCE 199309L
 
 #include "session.h"
 #include "word_bank.h"
