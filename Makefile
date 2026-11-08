@@ -45,7 +45,7 @@ CORE    = core
 
 # Every .c file the server needs to link into one program
 SERVER_SRC = server/server.c $(SRC)/session.c $(SRC)/game.c \
-             $(CORE)/blitz_mode.c $(CORE)/word_bank.c
+             $(CORE)/blitz_mode.c $(CORE)/classic_mode.c $(CORE)/word_bank.c
 
 # --- Targets ----------------------------------------------------------------
 # Default target: what plain "make" builds

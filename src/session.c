@@ -6,28 +6,31 @@
  *   1. The Session struct (its fields are hidden from every other file)
  *   2. create_session / destroy_session
  *   3. Small helpers: sending text, reading one line, the server's clock
- *   4. load_chain: picks the JSON file for the mode and a random chain (word_bank.h)
- *   5. Setup questions: choose the mode, then the coin flip
- *   6. play_blitz: the Blitz match loop (poll + the referee in blitz_mode.h)
- *   7. run_session: setup, then the match
+ *   4. Word list & custom input: JSON loader and player 5-word list collection
+ *   5. Setup questions: choose the mode, list source, then the coin flip
+ *   6. View & announcement helpers: formatting chain displays and match results
+ *   7. play_classic: the Classic match loop (poll + classic_mode.h referee)
+ *   8. play_blitz: the Blitz match loop (poll + blitz_mode.h referee)
+ *   9. run_session: setup, then the match
  *
  * Why is the struct here and not in session.h? Keeping it out of the header
  * makes Session opaque: server.c can hold a Session * but cannot reach inside,
  * so no outside code can change s->mode or s->fds by accident.
  *
- * Who does what: game.c checks guesses and keeps the scores, blitz_mode.c is
- * the referee (turns and clocks), and this file only coordinates: it reads
- * the sockets, asks the referee, and tells each player what happened.
+ * Who does what: game.c checks guesses and keeps the scores, classic_mode.c /
+ * blitz_mode.c act as referees (turns, rules and clocks), and this file only
+ * coordinates: it reads the sockets, asks the referee, and tells each player
+ * what happened.
  */
 
 /* Needed for clock_gettime and poll when compiling with -std=c99. */
-#define _POSIX_C_SOURCE 200809L         // macos
-// #define _POSIX_C_SOURCE 199309L
+#define _POSIX_C_SOURCE 200809L         /* macos / posix compliance */
 
 #include "session.h"
 #include "word_bank.h"
 #include "game.h"
 #include "blitz_mode.h"
+#include "classic_mode.h"
 
 #include <errno.h>      /* errno, EINTR */
 #include <limits.h>     /* INT_MAX */
@@ -35,7 +38,7 @@
 #include <stdarg.h>     /* va_list, for send_fmt */
 #include <stdio.h>      /* printf, snprintf */
 #include <stdlib.h>     /* calloc, free */
-#include <string.h>     /* strlen, memchr, memmove */
+#include <string.h>     /* strlen, memchr, memmove, strdup */
 #include <time.h>       /* clock_gettime */
 #include <sys/socket.h> /* send, recv */
 #include <sys/types.h>  /* ssize_t */
@@ -47,7 +50,7 @@
 /* Longest line a player can send. Anything longer is thrown away. */
 #define LINE_MAX_LEN 256
 
-/* ======== THE STRUCT ======== */
+/* ======== 1. THE STRUCT ======== */
 
 /**
  * Everything one match needs to remember.
@@ -64,10 +67,10 @@ struct Session {
     size_t chain1_len;            /**< Number of words in chain1. */
 
     Game game;           /**< Chains, hints and scores. Owned: freed in destroy_session. */
-    Mode referee;        /**< The Blitz referee (turns and clocks). Owned: destroyed in destroy_session. */
+    Mode referee;        /**< The mode referee (turns, clocks, rules). Owned: destroyed in destroy_session. */
 };
 
-/* ======== SETUP / TEARDOWN ======== */
+/* ======== 2. SETUP / TEARDOWN ======== */
 
 Session *create_session(int fd0, int fd1) {
     /* calloc zeroes every byte, so mode and source start at their first enum value,
@@ -88,13 +91,17 @@ void destroy_session(Session *s) {
 
     /* Order matters: the referee points at the game, so it goes first.
        The game copied its words, so the bank can go last. */
-    destroy_blitz_mode(&s->referee);   /* safe if the referee was never created */
+    if (s->mode == MODE_BLITZ) {
+        destroy_blitz_mode(&s->referee);   /* safe if the referee was never created */
+    } else {
+        destroy_classic_mode(&s->referee);
+    }
     free_game(&s->game);               /* safe on a zeroed Game */
     wb_free(s->bank);                  /* safe with NULL; also invalidates s->chain */
     free(s);
 }
 
-/* ======== SMALL HELPERS ======== */
+/* ======== 3. SMALL HELPERS ======== */
 
 /** Send a whole string, even if the network takes it in pieces. Errors are ignored:
     a dropped player is noticed when the loop next reads from that socket. */
@@ -160,20 +167,44 @@ static int read_line_blocking(int fd, char *line, size_t size) {
     return 0;
 }
 
-/* ======== WORD LIST ======== */
+/* ======== 4. WORD LIST & CUSTOM INPUT ======== */
+
+/**
+ * Prompt a player to enter 5 connected words sequentially over their socket.
+ * Used when players generate their own list in Classic mode.
+ *
+ * @param fd         Socket of the player entering words.
+ * @param words      Output array of 5 heap strings owned by the caller.
+ * @return 0 on success, -1 if the player disconnected.
+ */
+static int collect_player_chain(int fd, char *words[5]) {
+    send_text(fd, "\nEnter your 5 connected words, one per line:\n");
+    for (int i = 0; i < 5; i++) {
+        send_fmt(fd, "Word %d: ", i + 1);
+        char line[LINE_MAX_LEN];
+        if (read_line_blocking(fd, line, sizeof line) != 0) return -1;
+        trim_lower(line);
+        if (strlen(line) == 0) {
+            send_text(fd, "Word cannot be empty. Re-enter word.\n");
+            i--;
+            continue;
+        }
+        words[i] = strdup(line);
+    }
+    return 0;
+}
 
 /**
  * Load the JSON file that matches the mode and pick a random chain from it.
  *
- * Blitz always uses the game master's list. Classic uses it unless a player
- * is supposed to write the list (not implemented yet).
+ * Blitz always uses the game master's list. Classic uses it unless players
+ * supply their own list (handled directly during setup).
  *
  * @return 0 on success, -1 on failure (a message is printed to stderr).
  */
 static int load_chain(Session *s) {
     if (s->mode == MODE_CLASSIC && s->source == LIST_PLAYER) {
-        fprintf(stderr, "Player-made lists are not implemented yet.\n");
-        return -1;
+        return 0;   /* Player chains are collected directly during setup */
     }
 
     const char *path = (s->mode == MODE_BLITZ) ? BLITZ_DATA_FILE : CLASSIC_DATA_FILE;
@@ -183,10 +214,6 @@ static int load_chain(Session *s) {
     s->bank = wb_load(path);
     if (s->bank == NULL) {
         fprintf(stderr, "Could not load word list from %s (run the server from the repo root).\n", path);
-        s->chain = NULL;
-        s->chain_len = 0;
-        s->chain1 = NULL;
-        s->chain1_len = 0;
         return -1;
     }
 
@@ -213,7 +240,7 @@ static int load_chain(Session *s) {
     return 0;
 }
 
-/* ======== SETUP QUESTIONS ======== */
+/* ======== 5. SETUP QUESTIONS ======== */
 
 /**
  * Ask player 0 which mode to play.
@@ -234,6 +261,30 @@ static int ask_mode(Session *s) {
 
         if (strcmp(line, "1") == 0 || strcmp(line, "classic") == 0) { s->mode = MODE_CLASSIC; return 0; }
         if (strcmp(line, "2") == 0 || strcmp(line, "blitz") == 0)   { s->mode = MODE_BLITZ;   return 0; }
+
+        send_text(s->fds[0], "Please type 1 or 2.\ninput: ");
+    }
+}
+
+/**
+ * Ask player 0 who provides the word list (only asked in Classic mode).
+ *
+ * @return 0 on success (s->source is set), -1 if player 0 disconnected.
+ */
+static int ask_source(Session *s) {
+    send_text(s->fds[0], "\nChoose word list option:\n1. Server Game Master List\n2. Players generate own 5-word list\ninput: ");
+    send_text(s->fds[1], "\nPlayer 0 is choosing the word list option...\n");
+
+    char line[LINE_MAX_LEN];
+    for (;;) {
+        if (read_line_blocking(s->fds[0], line, sizeof line) != 0) {
+            send_text(s->fds[1], "\nPlayer 0 left the game.\n");
+            return -1;
+        }
+        trim_lower(line);
+
+        if (strcmp(line, "1") == 0) { s->source = LIST_GAME_MASTER; return 0; }
+        if (strcmp(line, "2") == 0) { s->source = LIST_PLAYER;      return 0; }
 
         send_text(s->fds[0], "Please type 1 or 2.\ninput: ");
     }
@@ -279,33 +330,37 @@ static int coin_flip(Session *s) {
     return first;
 }
 
-/* ======== BLITZ MATCH ======== */
+/* ======== 6. VIEW & ANNOUNCEMENT HELPERS ======== */
 
 /**
  * Send each player their own view of their chain, their score, and the turn
  * signal ("YOUR TURN" for the player who plays, "waiting" for the other).
  *
  * @param turn_player  Whose turn it is now (Result.next_player).
- * @param out          Which players have run out of time (they just watch).
+ * @param out          Which players have run out of time (Blitz only; NULL in Classic).
  */
 static void send_views(Session *s, int turn_player, const bool out[2]) {
     for (int p = 0; p < 2; p++) {
         send_text(s->fds[p], "\033[2J\033[H");
         char *view = NULL;
         if (view_game(&s->game, p, &view) == GAME_OK) {
-            long long ms_left = get_time_left(s->referee.self, p, now_ms());
-            int seconds_left = (int)(ms_left / 1000);
-
-            send_fmt(s->fds[p], "\n⏳ Time Left: %ds | Your chain:\n%s\nScore: %d   Opponent: %d\n",
-                     seconds_left, view, get_score(&s->game, p), get_score(&s->game, 1 - p));
-            free(view);   
+            if (s->mode == MODE_BLITZ) {
+                long long ms_left = get_time_left(s->referee.self, p, now_ms());
+                int seconds_left = (int)(ms_left / 1000);
+                send_fmt(s->fds[p], "\n⏳ Time Left: %ds | Your chain:\n%s\nScore: %d   Opponent: %d\n",
+                         seconds_left, view, get_score(&s->game, p), get_score(&s->game, 1 - p));
+            } else {
+                send_fmt(s->fds[p], "\nYour chain:\n%s\nScore: %d   Opponent: %d\n",
+                         view, get_score(&s->game, p), get_score(&s->game, 1 - p));
+            }
+            free(view);   /* view_game returns a malloc'd string: the caller frees it */
         }
 
-        if (out[p]) send_text(s->fds[p], "\n(your time is up - waiting for the match to end)\n");
-        else        send_text(s->fds[p], turn_prompt(p, turn_player));
-        
+        if (out && out[p]) send_text(s->fds[p], "\n(your time is up - waiting for the match to end)\n");
+        else               send_text(s->fds[p], turn_prompt(p, turn_player));
     }
 }
+
 /** Tell both players what a Result means for them (not used for GAME_OVER). */
 static void announce(Session *s, Result r) {
     int other = 1 - r.player;
@@ -317,7 +372,11 @@ static void announce(Session *s, Result r) {
         break;
     case RESULT_WRONG:
         send_text(s->fds[r.player], "\nWrong - a hint was added.\n");
-        send_fmt(s->fds[other], "\nPlayer %d guessed wrong.\n", r.player);
+        if (s->mode == MODE_CLASSIC) {
+            send_fmt(s->fds[other], "\nPlayer %d guessed wrong. Turn passes to opponent.\n", r.player);
+        } else {
+            send_fmt(s->fds[other], "\nPlayer %d guessed wrong.\n", r.player);
+        }
         break;
     case RESULT_PLAYER_OUT:
         send_text(s->fds[r.player], "\nYour time ran out. You are out.\n");
@@ -342,12 +401,6 @@ static void announce_game_over(Session *s, const char *reason) {
     }
 }
 
-/** Why a match ended, from the Result that ended it (forfeits are worded where they happen). */
-static const char *game_over_reason(const Session *s, Result r) {
-    if (is_game_finished(&s->game, r.player)) return "A player finished their whole list!";
-    return "Both players ran out of time.";
-}
-
 /**
  * Handle one complete line typed by a player: the referee decides what it means.
  *
@@ -358,21 +411,115 @@ static bool handle_line(Session *s, int player, const char *line, bool out[2]) {
     Result r = m->on_guess(m->self, player, line, now_ms());
 
     if (r.kind == RESULT_IGNORED) {   /* not this player's turn */
-        if (out[player]) send_text(s->fds[player], "\nYour time is up - you cannot play anymore.\n");
-        else             send_text(s->fds[player], "\nNot your turn - please wait.\n");
+        if (out && out[player]) send_text(s->fds[player], "\nYour time is up - you cannot play anymore.\n");
+        else                    send_text(s->fds[player], "\nNot your turn - please wait.\n");
         return false;
     }
 
     if (r.kind == RESULT_GAME_OVER) {
-        announce_game_over(s, game_over_reason(s, r));
+        announce_game_over(s, "A player completed their word list!");
         return true;
     }
 
-    if (r.kind == RESULT_PLAYER_OUT) out[r.player] = true;
+    if (r.kind == RESULT_PLAYER_OUT && out) out[r.player] = true;
     announce(s, r);
     send_views(s, r.next_player, out);
     return false;
 }
+
+/* ======== 7. CLASSIC MATCH ======== */
+
+/**
+ * The Classic match, from list setup and coin flip to the final result.
+ *
+ * Untimed turn-based gameplay: players take turns guessing words. A correct
+ * guess keeps the turn; a wrong guess adds a hint and passes the turn.
+ */
+static void play_classic(Session *s) {
+    if (s->source == LIST_PLAYER) {
+        char *words0[5] = {0};
+        char *words1[5] = {0};
+
+        send_text(s->fds[1], "\nPlayer 0 is entering their 5-word list...\n");
+        if (collect_player_chain(s->fds[0], words0) != 0) return;
+
+        send_text(s->fds[0], "\nPlayer 1 is entering their 5-word list...\n");
+        if (collect_player_chain(s->fds[1], words1) != 0) {
+            for (int i = 0; i < 5; i++) free(words0[i]);
+            return;
+        }
+
+        GameStatus st = game_init(&s->game, (const char *const *)words0, 5, (const char *const *)words1, 5);
+        for (int i = 0; i < 5; i++) {
+            free(words0[i]);
+            free(words1[i]);
+        }
+
+        if (st != GAME_OK) {
+            fprintf(stderr, "Could not initialize game with custom chains.\n");
+            return;
+        }
+    } else {
+        if (game_init(&s->game, s->chain, s->chain_len, s->chain1, s->chain1_len) != GAME_OK) {
+            fprintf(stderr, "Could not start the game.\n");
+            return;
+        }
+    }
+
+    if (!create_classic_mode(&s->referee, &s->game)) {
+        fprintf(stderr, "Could not create Classic referee.\n");
+        return;
+    }
+
+    int first = coin_flip(s);
+    if (first < 0) return;   /* someone left during the coin flip */
+
+    Mode *m = &s->referee;
+    m->start(m->self, first, 0);
+    send_views(s, first, NULL);
+
+    char inbuf[2][LINE_MAX_LEN];      /* partly received lines, one per player */
+    size_t inlen[2] = { 0, 0 };
+
+    while (!m->is_over(m->self)) {
+        struct pollfd pfd[2] = { { s->fds[0], POLLIN, 0 }, { s->fds[1], POLLIN, 0 } };
+        int ready = poll(pfd, 2, -1);   /* -1 means wait indefinitely (untimed turns) */
+        if (ready < 0) {
+            if (errno == EINTR) continue;
+            perror("poll() failed");
+            return;
+        }
+
+        for (int p = 0; p < 2; p++) {
+            if (!(pfd[p].revents & (POLLIN | POLLHUP | POLLERR))) continue;
+
+            ssize_t n = recv(s->fds[p], inbuf[p] + inlen[p], LINE_MAX_LEN - 1 - inlen[p], 0);
+            if (n <= 0) {   /* the player disconnected: the other player wins */
+                m->on_forfeit(m->self, p, 0);
+                send_fmt(s->fds[1 - p], "\nPlayer %d left the game.\n", p);
+                announce_game_over(s, "A player left the match.");
+                return;
+            }
+            inlen[p] += (size_t)n;
+
+            /* Take every complete line out of the buffer. */
+            char *newline;
+            while ((newline = memchr(inbuf[p], '\n', inlen[p])) != NULL) {
+                *newline = '\0';
+                size_t used = (size_t)(newline - inbuf[p]) + 1;
+
+                if (handle_line(s, p, inbuf[p], NULL)) return;   /* match over */
+
+                memmove(inbuf[p], inbuf[p] + used, inlen[p] - used);
+                inlen[p] -= used;
+            }
+
+            if (inlen[p] >= LINE_MAX_LEN - 1) inlen[p] = 0;   /* a line this long is junk: drop it */
+        }
+    }
+}
+
+/* ======== 8. BLITZ MATCH ======== */
 
 /**
  * The Blitz match, from the coin flip to the final result.
@@ -382,6 +529,7 @@ static bool handle_line(Session *s, int player, const char *line, bool out[2]) {
  * guess, a disconnect, or the deadline.
  */
 static void play_blitz(Session *s) {
+    /* Each player gets their own chain. game_init copies the words. */
     if (game_init(&s->game, s->chain, s->chain_len, s->chain1, s->chain1_len) != GAME_OK) {
         fprintf(stderr, "Could not start the game.\n");
         return;
@@ -392,15 +540,15 @@ static void play_blitz(Session *s) {
     }
 
     int first = coin_flip(s);
-    if (first < 0) return;   
+    if (first < 0) return;   /* someone left during the coin flip */
 
     Mode *m = &s->referee;
-    bool out[2] = { false, false };   
+    bool out[2] = { false, false };   /* players whose clock ran out */
 
     m->start(m->self, first, now_ms());
     send_views(s, first, out);
 
-    char inbuf[2][LINE_MAX_LEN];      
+    char inbuf[2][LINE_MAX_LEN];      /* partly received lines, one per player */
     size_t inlen[2] = { 0, 0 };
 
     while (!m->is_over(m->self)) {
@@ -417,16 +565,14 @@ static void play_blitz(Session *s) {
 
         long long current_time = now_ms();
 
-        /* Deadline arrived: active player ran out of time */
+        /* Nobody sent anything and the deadline arrived: the active clock ran out. */
         if (ready == 0) {
             Result r = m->on_timeout(m->self, current_time);
             if (r.kind == RESULT_GAME_OVER) {
                 announce_game_over(s, "Both players ran out of time.");
                 return;
             }
-            if (r.kind == RESULT_PLAYER_OUT) {
-                out[r.player] = true;
-            }
+            if (r.kind == RESULT_PLAYER_OUT) out[r.player] = true;
             announce(s, r);
             send_views(s, blitz_active_player(m->self), out);
             continue;
@@ -437,7 +583,7 @@ static void play_blitz(Session *s) {
             if (!(pfd[p].revents & (POLLIN | POLLHUP | POLLERR))) continue;
 
             ssize_t n = recv(s->fds[p], inbuf[p] + inlen[p], LINE_MAX_LEN - 1 - inlen[p], 0);
-            if (n <= 0) {   
+            if (n <= 0) {   /* the player disconnected: the other player wins */
                 m->on_forfeit(m->self, p, current_time);
                 send_fmt(s->fds[1 - p], "\nPlayer %d left the game.\n", p);
                 announce_game_over(s, "A player left the match.");
@@ -445,32 +591,35 @@ static void play_blitz(Session *s) {
             }
             inlen[p] += (size_t)n;
 
+            /* Take every complete line out of the buffer. */
             char *newline;
             while ((newline = memchr(inbuf[p], '\n', inlen[p])) != NULL) {
                 *newline = '\0';
                 size_t used = (size_t)(newline - inbuf[p]) + 1;
 
-                if (handle_line(s, p, inbuf[p], out)) return;   
+                if (handle_line(s, p, inbuf[p], out)) return;   /* match over */
 
                 memmove(inbuf[p], inbuf[p] + used, inlen[p] - used);
                 inlen[p] -= used;
             }
 
-            if (inlen[p] >= LINE_MAX_LEN - 1) inlen[p] = 0;   
+            if (inlen[p] >= LINE_MAX_LEN - 1) inlen[p] = 0;   /* a line this long is junk: drop it */
         }
-    } 
+    }
 }
 
-/* ======== RUNNING ======== */
+/* ======== 9. RUNNING ======== */
 
 void run_session(Session *s) {
     if (s == NULL) return;
 
-    printf("fd0: %d\n", s->fds[0]);
-    printf("fd1: %d\n", s->fds[1]);
-
     /* Setup: which mode? */
     if (ask_mode(s) != 0) return;
+
+    /* Setup: which word list source? (Classic mode only) */
+    if (s->mode == MODE_CLASSIC) {
+        if (ask_source(s) != 0) return;
+    }
 
     /* Pick the word chain for this match. */
     if (load_chain(s) != 0) {
@@ -479,20 +628,9 @@ void run_session(Session *s) {
         return;
     }
 
-    printf("Mode: %s. Player 0 chain (%zu words):", s->mode == MODE_BLITZ ? "Blitz" : "Classic", s->chain_len);
-    for (size_t i = 0; i < s->chain_len; i++) printf(" %s", s->chain[i]);
-    printf("\n");
-    if (s->mode == MODE_BLITZ) {
-        printf("Player 1 chain (%zu words):", s->chain1_len);
-        for (size_t i = 0; i < s->chain1_len; i++) printf(" %s", s->chain1[i]);
-        printf("\n");
-    }
-
     if (s->mode == MODE_BLITZ) {
         play_blitz(s);
     } else {
-        /* Classic is not on the referee interface yet. */
-        send_text(s->fds[0], "\nClassic mode is not available yet.\n");
-        send_text(s->fds[1], "\nClassic mode is not available yet.\n");
+        play_classic(s);
     }
 }
