@@ -51,6 +51,11 @@
 /* Longest line a player can send. Anything longer is thrown away. */
 #define LINE_MAX_LEN 256
 
+/* The Blitz time header, shown on screen row 2 (send_views clears the screen and
+   starts with one empty line). Shared so the first draw and the per-second
+   redraw in tick_times() always look identical. */
+#define TIME_HEADER_FMT "⏳ Time Left: %llds | Your chain:"
+
 /* ======== 1. THE STRUCT ======== */
 
 /**
@@ -132,6 +137,12 @@ static long long now_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+/** Milliseconds to whole seconds, rounded UP: floor would show 28 right after 29 was due,
+    and 0 while time still remains. */
+static long long to_seconds(long long ms) {
+    return (ms + 999) / 1000;
 }
 
 /** Lowercase a line in place and trim spaces from both ends. */
@@ -347,9 +358,8 @@ static void send_views(Session *s, int turn_player, const bool out[2]) {
         if (view_game(&s->game, p, &view) == GAME_OK) {
             if (s->mode == MODE_BLITZ) {
                 long long ms_left = get_time_left(s->referee.self, p, now_ms());
-                int seconds_left = (int)(ms_left / 1000);
-                send_fmt(s->fds[p], "\n⏳ Time Left: %ds | Your chain:\n%s\nScore: %d   Opponent: %d\n",
-                         seconds_left, view, get_score(&s->game, p), get_score(&s->game, 1 - p));
+                send_fmt(s->fds[p], "\n" TIME_HEADER_FMT "\n%s\nScore: %d   Opponent: %d\n",
+                         to_seconds(ms_left), view, get_score(&s->game, p), get_score(&s->game, 1 - p));
             } else {
                 send_fmt(s->fds[p], "\nYour chain:\n%s\nScore: %d   Opponent: %d\n",
                          view, get_score(&s->game, p), get_score(&s->game, 1 - p));
@@ -359,6 +369,23 @@ static void send_views(Session *s, int turn_player, const bool out[2]) {
 
         if (out && out[p]) send_text(s->fds[p], "\n(your time is up - waiting for the match to end)\n");
         else               send_text(s->fds[p], turn_prompt(p, turn_player));
+    }
+}
+
+/**
+ * Blitz only: redraw JUST the time header, so the clock counts down on its own.
+ *
+ * send_views() clears the screen and puts the header on row 2, so the header can
+ * be rewritten by absolute position: save the cursor, jump to row 2, clear that
+ * line, write the new time, restore the cursor. Whatever the player is typing on
+ * the input line is not touched. Called once per second from play_blitz().
+ * (ESC 7 / ESC 8 = save / restore cursor, ESC [ 2 ; 1 H = go to row 2, ESC [ 2 K = clear line.)
+ */
+static void tick_times(Session *s) {
+    long long now = now_ms();
+    for (int p = 0; p < 2; p++) {
+        long long ms_left = get_time_left(s->referee.self, p, now);
+        send_fmt(s->fds[p], "\0337\033[2;1H\033[2K" TIME_HEADER_FMT "\0338", to_seconds(ms_left));
     }
 }
 
@@ -548,12 +575,24 @@ static void play_blitz(Session *s) {
 
     m->start(m->self, first, now_ms());
     send_views(s, first, out);
+    long long next_tick = now_ms() + 1000;   /* when the time header is next redrawn */
 
     char inbuf[2][LINE_MAX_LEN];      /* partly received lines, one per player */
     size_t inlen[2] = { 0, 0 };
 
     while (!m->is_over(m->self)) {
-        long long wait = m->ms_until_deadline(m->self, now_ms());
+        long long now = now_ms();
+
+        /* Once per second, redraw the time header so the clock visibly counts down. */
+        if (now >= next_tick) {
+            tick_times(s);
+            while (next_tick <= now) next_tick += 1000;
+        }
+
+        /* Sleep until the earlier of: the clock deadline, the next tick. */
+        long long wait = m->ms_until_deadline(m->self, now);
+        long long to_tick = next_tick - now;
+        if (wait < 0 || wait > to_tick) wait = to_tick;
         int timeout_ms = (wait > INT_MAX) ? INT_MAX : (int)wait;
 
         struct pollfd pfd[2] = { { s->fds[0], POLLIN, 0 }, { s->fds[1], POLLIN, 0 } };
@@ -566,9 +605,11 @@ static void play_blitz(Session *s) {
 
         long long current_time = now_ms();
 
-        /* Nobody sent anything and the deadline arrived: the active clock ran out. */
+        /* Nobody sent anything: either the deadline arrived (the active clock ran out)
+           or it was only the one-second tick. */
         if (ready == 0) {
             Result r = m->on_timeout(m->self, current_time);
+            if (r.kind == RESULT_IGNORED) continue;   /* only the one-second tick woke us: redrawn at the top of the loop */
             if (r.kind == RESULT_GAME_OVER) {
                 announce_game_over(s, "Both players ran out of time.");
                 return;
