@@ -6,6 +6,7 @@
  * a Session (player 0 = first to connect, player 1 = second), runs the match,
  * then cleans up.
  *
+ * Without running make -j, do this:
  * Compile: make            (builds server_app)
  * Run:     ./server_app 5000     (from the project root, so data/ is found)
  */
