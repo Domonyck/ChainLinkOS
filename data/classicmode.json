@@ -34,7 +34,12 @@
     ["pillow", "fight", "back", "pain", "relief", "camp", "site"],
     ["word", "search", "party", "animal", "shelter", "home", "town"],
     ["show", "down", "town", "hall", "way", "lay", "man"],
-    ["cell", "phone", "case", "study", "group", "chat", "box"]
+    ["cell", "phone", "case", "study", "group", "chat", "box"],
+    ["turtle", "neck", "tie", "up", "root", "word", "play"],
+    ["key", "board", "game", "play", "ground", "work", "book"],
+    ["mouse", "pad", "paper", "work", "off", "set", "up"],
+    ["paper", "cut", "out", "side", "piece", "wise", "man"],
+    ["flag", "pole", "dance", "break", "down", "grade", "level"]
   ],
   "word_bank": [
 
