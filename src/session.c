@@ -199,15 +199,41 @@ static int read_line_blocking(int fd, char *line, size_t size) {
  * @param words      Output array of 5 heap strings owned by the caller.
  * @return 0 on success, -1 if the player disconnected.
  */
+/** True if the (already trimmed) line has a space or tab inside it, e.g. "out shot". */
+static bool has_inner_space(const char *s) {
+    for (; *s != '\0'; s++)
+        if (*s == ' ' || *s == '\t') return true;
+    return false;
+}
+/** True if the (already trimmed and lowercased) line contains only letters a-z. */
+static bool is_letters_only(const char *s) {
+    for (; *s != '\0'; s++)
+        if (*s < 'a' || *s > 'z') return false;
+    return true;
+}
 static int collect_player_chain(int fd, char *words[5]) {
-    send_text(fd, "\nEnter your 5 connected words, one per line:\n");
+    send_text(fd, "\nEnter your 5 connected words, one per line (one word each):\n");
     for (int i = 0; i < 5; i++) {
         send_fmt(fd, "Word %d: ", i + 1);
         char line[LINE_MAX_LEN];
-        if (read_line_blocking(fd, line, sizeof line) != 0) return -1;
-        trim_lower(line);
+        if (read_line_blocking(fd, line, sizeof line) != 0) {
+            for (int j = 0; j < i; j++) free(words[j]);   /* don't leak the words already entered */
+            return -1;
+        }
+        trim_lower(line);   /* removes extra spaces at both ends and lowercases */
+
         if (strlen(line) == 0) {
             send_text(fd, "Word cannot be empty. Re-enter word.\n");
+            i--;
+            continue;
+        }
+        if (has_inner_space(line)) {
+            send_text(fd, "Invalid word: please enter a single word with no spaces. Re-enter word.\n");
+            i--;
+            continue;
+        }
+        if (!is_letters_only(line)) {
+            send_text(fd, "Invalid word: use letters only (a-z). Re-enter word.\n");
             i--;
             continue;
         }
@@ -491,8 +517,7 @@ static void play_classic(Session *s) {
             for (int i = 0; i < 5; i++) free(words0[i]);
             return;
         }
-
-        GameStatus st = game_init(&s->game, (const char *const *)words0, 5, (const char *const *)words1, 5);
+		GameStatus st = game_init(&s->game, (const char *const *)words1, 5, (const char *const *)words0, 5);
         for (int i = 0; i < 5; i++) {
             free(words0[i]);
             free(words1[i]);
