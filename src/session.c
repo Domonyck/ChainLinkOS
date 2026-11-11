@@ -1,29 +1,3 @@
-/**
- * @file session.c
- * @brief Implementation of the Session module declared in session.h.
- *
- * Layout of this file:
- *   1. The Session struct (its fields are hidden from every other file)
- *   2. create_session / destroy_session
- *   3. Small helpers: sending text, reading one line, the server's clock
- *   4. Word list & custom input: JSON loader and player 5-word list collection
- *   5. Setup questions: choose the mode, list source, then the coin flip
- *   6. View & announcement helpers: formatting chain displays and match results
- *   7. play_classic: the Classic match loop (poll + classic_mode.h referee)
- *   8. play_blitz: the Blitz match loop (poll + blitz_mode.h referee)
- *   9. run_session: setup, then the match
- *
- * Why is the struct here and not in session.h? Keeping it out of the header
- * makes Session opaque: server.c can hold a Session * but cannot reach inside,
- * so no outside code can change s->mode or s->fds by accident.
- *
- * Who does what: game.c checks guesses and keeps the scores, classic_mode.c /
- * blitz_mode.c act as referees (turns, rules and clocks), and this file only
- * coordinates: it reads the sockets, asks the referee, and tells each player
- * what happened.
- */
-
-/* Needed for clock_gettime and poll when compiling with -std=c99. */
 #define _POSIX_C_SOURCE 200809L    // macos
 // #define _POSIX_C_SOURCE 199309L
 
@@ -32,30 +6,24 @@
 #include "game.h"
 #include "blitz_mode.h"
 #include "classic_mode.h"
+#include "ascii_art.h"
+#include <errno.h>     
+#include <limits.h>   
+#include <poll.h>      
+#include <stdarg.h>    
+#include <stdio.h>      
+#include <stdlib.h>     
+#include <string.h>     
+#include <time.h>      
+#include <sys/socket.h> 
+#include <sys/types.h>  
 
-#include <errno.h>      /* errno, EINTR */
-#include <limits.h>     /* INT_MAX */
-#include <poll.h>       /* poll */
-#include <stdarg.h>     /* va_list, for send_fmt */
-#include <stdio.h>      /* printf, snprintf */
-#include <stdlib.h>     /* calloc, free */
-#include <string.h>     /* strlen, memchr, memmove, strdup */
-#include <time.h>       /* clock_gettime */
-#include <sys/socket.h> /* send, recv */
-#include <sys/types.h>  /* ssize_t */
-
-/* Data files, relative to the directory the server is started from (the repo root). */
 #define CLASSIC_DATA_FILE "data/classicmode.json"
 #define BLITZ_DATA_FILE   "data/blitzmode.json"
 
-/* Longest line a player can send. Anything longer is thrown away. */
 #define LINE_MAX_LEN 256
 
-/* The Blitz time header, shown on screen row 2 (send_views clears the screen and
-   starts with one empty line). Shared so the first draw and the per-second
-   redraw in tick_times() always look identical. */
 #define TIME_HEADER_FMT "⏳ Time Left: %llds | Your chain:"
-#define BANNER_ROWS 9
 #define BANNER \
     "\033[0;97m  ██▀▀▀▀▀\033[0;37m \033[0;97m  ██   ██\033[0;37m  \033[0;97m  ██▀▀▀██\033[0;37m  \033[0;97m  ▀██▀\033[0;37m  \033[0;97m  ██▀▀▀▄▄\033[0;37m  \033[0;97m  ██      \033[0;97m  ▀██▀\033[0;37m  \033[0;97m  ██▀▀▀▄▄\033[0;37m  \033[0;97m  ██ \033[0;37m \033[0;97m ██\033[0;37m  \033[0m\n" \
     "\033[0;37m█\033[0;97m ██\033[0;37m ██████\033[0;97m ██ \033[0;37m█\033[0;97m ██ \033[0;37m██\033[0;97m ██ \033[0;37m█\033[0;97m ██ \033[0;37m███\033[0;97m ██ \033[0;37m███\033[0;97m ██ \033[0;37m█\033[0;97m ██ \033[0;37m██\033[0;97m ██ \033[0;37m███████\033[0;97m ██ \033[0;37m███\033[0;97m ██ \033[0;37m█\033[0;97m ██ \033[0;37m██\033[0;97m ██ \033[0;37m█\033[0;97m ██ \033[0;37m█\033[0m\n" \
@@ -66,61 +34,46 @@
     "\033[0;37m█\033[0;97m ██ \033[0;37m██████\033[0;97m ██ \033[0;37m█\033[0;97m ██ \033[0;37m██\033[0;97m ██ \033[0;37m█\033[0;97m ██ \033[0;37m███\033[0;97m ██ \033[0;37m███\033[0;97m ██ \033[0;37m█ \033[0;97m██ \033[0;37m██\033[0;97m ██ \033[0;37m███████\033[0;97m ██ \033[0;37m███\033[0;97m ██ \033[0;37m█ \033[0;97m██ \033[0;37m██\033[0;97m ██ \033[0;37m█\033[0;97m ██ \033[0;37m█\033[0m\n" \
     "\033[0;37m█\033[0;97m ██\033[0;37m ██████\033[0;97m ██ \033[0;37m█\033[0;97m ██ \033[0;37m██\033[0;97m ██ \033[0;37m█\033[0;97m ██ \033[0;37m███\033[0;97m ██ \033[0;37m███\033[0;97m ██ \033[0;37m█\033[0;97m ██ \033[0;37m██\033[0;97m ██ \033[0;37m███████\033[0;97m ██ \033[0;37m███\033[0;97m ██ \033[0;37m█\033[0;97m ██ \033[0;37m██\033[0;97m ██ \033[0;37m█\033[0;97m ██ \033[0;37m█\033[0m\n" \
     "\033[0;37m▀\033[0;97m ██▄▄▄▄▄\033[0;37m ▀\033[0;97m ██ \033[0;37m▀\033[0;97m ██ \033[0;37m▀▀\033[0;97m ██ \033[0;37m▀\033[0;97m ██ \033[0;37m▀▀\033[0;97m ▄██▄ \033[0;37m▀▀\033[0;97m ██ \033[0;37m▀\033[0;97m ██\033[0;37m ▀▀\033[0;97m ██▄▄▄▄ \033[0;37m▀▀\033[0;97m ▄██▄ \033[0;37m▀▀\033[0;97m ██ \033[0;37m▀\033[0;97m ██\033[0;37m ▀▀\033[0;97m ██ \033[0;37m▀\033[0;97m ██ \033[0;37m▀\033[0m\n"
-/* ======== 1. THE STRUCT ======== */
 
-/**
- * Everything one match needs to remember.
- */
 struct Session {
-    int fds[2];          /**< Sockets of player 0 and player 1. Not owned: never closed here. */
-    GameMode mode;       /**< Classic or Blitz. */
-    ListSource source;   /**< Who provides the list (only asked in Classic). */
+    int fds[2];         
+    GameMode mode;       
+    ListSource source;   
 
-    WordBank *bank;               /**< Loaded JSON data. Owned: freed in destroy_session. */
-    const char *const *chain;     /**< Player 0's chain. Points INTO bank, so never freed on its own. */
-    size_t chain_len;             /**< Number of words in chain. */
-    const char *const *chain1;    /**< Player 1's chain (Blitz: a different chain from player 0's). Points INTO bank. */
-    size_t chain1_len;            /**< Number of words in chain1. */
+    WordBank *bank;               
+    const char *const *chain;     
+    size_t chain_len;             
+    const char *const *chain1;   
+    size_t chain1_len;           
 
-    Game game;           /**< Chains, hints and scores. Owned: freed in destroy_session. */
-    Mode referee;        /**< The mode referee (turns, clocks, rules). Owned: destroyed in destroy_session. */
+    Game game;           
+    Mode referee;      
 };
 
-/* ======== 2. SETUP / TEARDOWN ======== */
 
 Session *create_session(int fd0, int fd1) {
-    /* calloc zeroes every byte, so mode and source start at their first enum value,
-       and the Game and the referee start empty (safe to free). */
+  
     Session *s = calloc(1, sizeof *s);
 
-    if (s == NULL) return s;   /* out of memory: the caller checks for NULL */
-
-    /* Remember the sockets (destination = source: the session's field gets the argument). */
+    if (s == NULL) return s;  
     s->fds[0] = fd0;
     s->fds[1] = fd1;
 
-    return s;   /* without this line the caller receives garbage */
+    return s;  
 }
 
 void destroy_session(Session *s) {
     if (s == NULL) return;
 
-    /* Order matters: the referee points at the game, so it goes first.
-       The game copied its words, so the bank can go last. */
     if (s->mode == MODE_BLITZ) {
-        destroy_blitz_mode(&s->referee);   /* safe if the referee was never created */
+        destroy_blitz_mode(&s->referee);  
     } else {
         destroy_classic_mode(&s->referee);
     }
-    free_game(&s->game);               /* safe on a zeroed Game */
-    wb_free(s->bank);                  /* safe with NULL; also invalidates s->chain */
+    free_game(&s->game);              
+    wb_free(s->bank);                 
     free(s);
 }
-
-/* ======== 3. SMALL HELPERS ======== */
-
-/** Send a whole string, even if the network takes it in pieces. Errors are ignored:
-    a dropped player is noticed when the loop next reads from that socket. */
 static void send_text(int fd, const char *text) {
     size_t left = strlen(text);
     while (left > 0) {
@@ -130,8 +83,6 @@ static void send_text(int fd, const char *text) {
         left -= (size_t)n;
     }
 }
-
-/** printf-style send_text, for messages that contain numbers or names. */
 static void send_fmt(int fd, const char *format, ...) {
     char buf[512];
     va_list args;
@@ -140,22 +91,14 @@ static void send_fmt(int fd, const char *format, ...) {
     va_end(args);
     send_text(fd, buf);
 }
-
-/** The server's own clock in milliseconds. Monotonic: never jumps when the
-    computer's time is changed. Client clocks are never used. */
 static long long now_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
-
-/** Milliseconds to whole seconds, rounded UP: floor would show 28 right after 29 was due,
-    and 0 while time still remains. */
 static long long to_seconds(long long ms) {
     return (ms + 999) / 1000;
 }
-
-/** Lowercase a line in place and trim spaces from both ends. */
 static void trim_lower(char *s) {
     size_t len = strlen(s);
     while (len > 0 && (s[len - 1] == ' ' || s[len - 1] == '\t' || s[len - 1] == '\r' || s[len - 1] == '\n'))
@@ -168,14 +111,6 @@ static void trim_lower(char *s) {
     for (size_t i = 0; s[i] != '\0'; i++)
         if (s[i] >= 'A' && s[i] <= 'Z') s[i] = (char)(s[i] - 'A' + 'a');
 }
-
-/**
- * Read one line from a socket, waiting for it (used for the setup questions,
- * before any clock is running).
- *
- * @return 0 on success (line holds the text, without the newline),
- *         -1 if the player disconnected.
- */
 static int read_line_blocking(int fd, char *line, size_t size) {
     size_t len = 0;
     for (;;) {
@@ -183,29 +118,17 @@ static int read_line_blocking(int fd, char *line, size_t size) {
         ssize_t n = recv(fd, &c, 1, 0);
         if (n <= 0) return -1;
         if (c == '\n') break;
-        if (len + 1 < size) line[len++] = c;   /* extra characters are dropped */
+        if (len + 1 < size) line[len++] = c;   
     }
     line[len] = '\0';
     return 0;
 }
 
-/* ======== 4. WORD LIST & CUSTOM INPUT ======== */
-
-/**
- * Prompt a player to enter 5 connected words sequentially over their socket.
- * Used when players generate their own list in Classic mode.
- *
- * @param fd         Socket of the player entering words.
- * @param words      Output array of 5 heap strings owned by the caller.
- * @return 0 on success, -1 if the player disconnected.
- */
-/** True if the (already trimmed) line has a space or tab inside it, e.g. "out shot". */
 static bool has_inner_space(const char *s) {
     for (; *s != '\0'; s++)
         if (*s == ' ' || *s == '\t') return true;
     return false;
 }
-/** True if the (already trimmed and lowercased) line contains only letters a-z. */
 static bool is_letters_only(const char *s) {
     for (; *s != '\0'; s++)
         if (*s < 'a' || *s > 'z') return false;
@@ -217,10 +140,10 @@ static int collect_player_chain(int fd, char *words[5]) {
         send_fmt(fd, "Word %d: ", i + 1);
         char line[LINE_MAX_LEN];
         if (read_line_blocking(fd, line, sizeof line) != 0) {
-            for (int j = 0; j < i; j++) free(words[j]);   /* don't leak the words already entered */
+            for (int j = 0; j < i; j++) free(words[j]); 
             return -1;
         }
-        trim_lower(line);   /* removes extra spaces at both ends and lowercases */
+        trim_lower(line);   
 
         if (strlen(line) == 0) {
             send_text(fd, "Word cannot be empty. Re-enter word.\n");
@@ -242,22 +165,13 @@ static int collect_player_chain(int fd, char *words[5]) {
     return 0;
 }
 
-/**
- * Load the JSON file that matches the mode and pick a random chain from it.
- *
- * Blitz always uses the game master's list. Classic uses it unless players
- * supply their own list (handled directly during setup).
- *
- * @return 0 on success, -1 on failure (a message is printed to stderr).
- */
 static int load_chain(Session *s) {
     if (s->mode == MODE_CLASSIC && s->source == LIST_PLAYER) {
-        return 0;   /* Player chains are collected directly during setup */
+        return 0;   
     }
 
     const char *path = (s->mode == MODE_BLITZ) ? BLITZ_DATA_FILE : CLASSIC_DATA_FILE;
 
-    /* Drop a previously loaded bank so calling this twice does not leak. */
     wb_free(s->bank);
     s->bank = wb_load(path);
     if (s->bank == NULL) {
@@ -272,9 +186,6 @@ static int load_chain(Session *s) {
     }
 
     if (s->mode == MODE_BLITZ) {
-        /* Each player gets their own chain. The second index is picked from the
-           chains that are left, so the two players never share one (unless the
-           file has only a single chain). */
         size_t i0 = (size_t)rand() % count;
         size_t i1 = (count >= 2) ? (i0 + 1 + (size_t)rand() % (count - 1)) % count : i0;
         s->chain  = wb_get_chain(s->bank, i0, &s->chain_len);
@@ -288,13 +199,6 @@ static int load_chain(Session *s) {
     return 0;
 }
 
-/* ======== 5. SETUP QUESTIONS ======== */
-
-/**
- * Ask player 0 which mode to play.
- *
- * @return 0 on success (s->mode is set), -1 if player 0 disconnected.
- */
 static int ask_mode(Session *s) {
     send_text(s->fds[0], "\nChoose a mode: type 1 for Classic or 2 for Blitz\ninput: ");
     send_text(s->fds[1], "\nPlayer 0 is choosing the game mode...\n");
@@ -314,11 +218,6 @@ static int ask_mode(Session *s) {
     }
 }
 
-/**
- * Ask player 0 who provides the word list (only asked in Classic mode).
- *
- * @return 0 on success (s->source is set), -1 if player 0 disconnected.
- */
 static int ask_source(Session *s) {
     send_text(s->fds[0], "\nChoose word list option:\n1. Server Game Master List\n2. Players generate own 5-word list\ninput: ");
     send_text(s->fds[1], "\nPlayer 0 is choosing the word list option...\n");
@@ -338,12 +237,6 @@ static int ask_source(Session *s) {
     }
 }
 
-/**
- * The coin flip: a random player calls heads or tails, the server flips once,
- * and both players are told the result so they agree on who starts.
- *
- * @return The player who goes first (0 or 1), or -1 if someone disconnected.
- */
 static int coin_flip(Session *s) {
     int caller = pick_caller();
     int other = 1 - caller;
@@ -378,59 +271,85 @@ static int coin_flip(Session *s) {
     return first;
 }
 
-/* ======== 6. VIEW & ANNOUNCEMENT HELPERS ======== */
+static char *render_ascii_view(const char *view) {
+    int h = ascii_get_height();
+    size_t cap = strlen(view) * (size_t)h * 26 + 64;
+    char *out = malloc(cap);
+    if (!out) return NULL;
+    size_t k = 0;
 
-/**
- * Send each player their own view of their chain, their score, and the turn
- * signal ("YOUR TURN" for the player who plays, "waiting" for the other).
- *
- * @param turn_player  Whose turn it is now (Result.next_player).
- * @param out          Which players have run out of time (Blitz only; NULL in Classic).
- */
-static void send_views(Session *s, int turn_player, const bool out[2]) {
-    for (int p = 0; p < 2; p++) {
-        /* Clear the screen, then redraw the banner at the top.
-           send_text (not send_fmt): the banner is longer than send_fmt's 512-byte buffer. */
-        send_text(s->fds[p], "\033[2J\033[H");
-        send_text(s->fds[p], BANNER);
+    const char *line = view;
+    while (*line != '\0') {
+        const char *end = strchr(line, '\n');
+        if (!end) end = line + strlen(line);
 
-        char *view = NULL;
-        if (view_game(&s->game, p, &view) == GAME_OK) {
-            if (s->mode == MODE_BLITZ) {
-                long long ms_left = get_time_left(s->referee.self, p, now_ms());
-                send_fmt(s->fds[p], "\n" TIME_HEADER_FMT "\n%s\nScore: %d   Opponent: %d\n",
-                         to_seconds(ms_left), view, get_score(&s->game, p), get_score(&s->game, 1 - p));
-            } else {
-                send_fmt(s->fds[p], "\nYour chain:\n%s\nScore: %d   Opponent: %d\n",
-                         view, get_score(&s->game, p), get_score(&s->game, 1 - p));
+        bool current = (line[0] == '>');
+        const char *word = line + 2;                 
+        size_t wlen = (size_t)(end - word);
+
+        for (int row = 0; row < h; row++) {
+            const char *marker = (current && row == h / 2) ? "> " : "  ";
+            memcpy(out + k, marker, 2);
+            k += 2;
+
+            for (size_t i = 0; i < wlen; i++) {
+                const char *piece = ascii_get_line(word[i], row);
+                size_t n = strlen(piece);
+                memcpy(out + k, piece, n);
+                k += n;
+                out[k++] = ' ';                      
             }
-            free(view);   /* view_game returns a malloc'd string: the caller frees it */
+            out[k++] = '\n';
         }
 
-        if (out && out[p]) send_text(s->fds[p], "\n(your time is up - waiting for the match to end)\n");
-        else               send_text(s->fds[p], turn_prompt(p, turn_player));
+        line = (*end == '\n') ? end + 1 : end;
     }
+    out[k] = '\0';
+    return out;
+}
+static void send_views(Session *s, int turn_player, const bool out[2]) {
+	for (int p = 0; p < 2; p++) {
+	    send_text(s->fds[p], "\033[2J\033[H");
+
+	    if (s->mode == MODE_BLITZ) {
+	        long long ms_left = get_time_left(s->referee.self, p, now_ms());
+	        send_fmt(s->fds[p], TIME_HEADER_FMT, to_seconds(ms_left));   /* row 1 */
+	        send_text(s->fds[p], "\033[2;r\033[2;1H");   /* scroll region = row 2 down; cursor to row 2 */
+	    }
+
+	    send_text(s->fds[p], BANNER);
+
+	    char *view = NULL;
+	    if (view_game(&s->game, p, &view) == GAME_OK) {
+	        char *art = render_ascii_view(view);
+	        free(view);
+
+	        if (s->mode != MODE_BLITZ) send_text(s->fds[p], "\nYour chain:\n");
+	        else                       send_text(s->fds[p], "\n");
+
+	        if (art) {
+	            send_text(s->fds[p], art);
+	            free(art);
+	        }
+
+	        send_fmt(s->fds[p], "\nScore: %d   Opponent: %d\n",
+	                 get_score(&s->game, p), get_score(&s->game, 1 - p));
+	    }
+
+	    if (out && out[p]) send_text(s->fds[p], "\n(your time is up - waiting for the match to end)\n");
+	    else               send_text(s->fds[p], turn_prompt(p, turn_player));
+	}
 }
 
-/**
- * Blitz only: redraw JUST the time header, so the clock counts down on its own.
- *
- * send_views() clears the screen and puts the header on row 2, so the header can
- * be rewritten by absolute position: save the cursor, jump to row 2, clear that
- * line, write the new time, restore the cursor. Whatever the player is typing on
- * the input line is not touched. Called once per second from play_blitz().
- * (ESC 7 / ESC 8 = save / restore cursor, ESC [ 2 ; 1 H = go to row 2, ESC [ 2 K = clear line.)
- */
 static void tick_times(Session *s) {
     long long now = now_ms();
     for (int p = 0; p < 2; p++) {
         long long ms_left = get_time_left(s->referee.self, p, now);
-        send_fmt(s->fds[p], "\0337\033[%d;1H\033[2K" TIME_HEADER_FMT "\0338",
-                 BANNER_ROWS + 2, to_seconds(ms_left));
+        send_fmt(s->fds[p], "\0337\033[1;1H\033[2K" TIME_HEADER_FMT "\0338",
+                 to_seconds(ms_left));
     }
 }
 
-/** Tell both players what a Result means for them (not used for GAME_OVER). */
 static void announce(Session *s, Result r) {
     int other = 1 - r.player;
 
@@ -456,7 +375,6 @@ static void announce(Session *s, Result r) {
     }
 }
 
-/** Announce the end of the match: the reason, both scores, and who won. */
 static void announce_game_over(Session *s, const char *reason) {
     int winner = s->referee.winner(s->referee.self);
 
@@ -470,11 +388,6 @@ static void announce_game_over(Session *s, const char *reason) {
     }
 }
 
-/**
- * Handle one complete line typed by a player: the referee decides what it means.
- *
- * @return true if the match is over after this line.
- */
 static bool handle_line(Session *s, int player, const char *line, bool out[2]) {
     Mode *m = &s->referee;
     Result r = m->on_guess(m->self, player, line, now_ms());
@@ -496,14 +409,6 @@ static bool handle_line(Session *s, int player, const char *line, bool out[2]) {
     return false;
 }
 
-/* ======== 7. CLASSIC MATCH ======== */
-
-/**
- * The Classic match, from list setup and coin flip to the final result.
- *
- * Untimed turn-based gameplay: players take turns guessing words. A correct
- * guess keeps the turn; a wrong guess adds a hint and passes the turn.
- */
 static void play_classic(Session *s) {
     if (s->source == LIST_PLAYER) {
         char *words0[5] = {0};
@@ -540,18 +445,18 @@ static void play_classic(Session *s) {
     }
 
     int first = coin_flip(s);
-    if (first < 0) return;   /* someone left during the coin flip */
+    if (first < 0) return;   
 
     Mode *m = &s->referee;
     m->start(m->self, first, 0);
     send_views(s, first, NULL);
 
-    char inbuf[2][LINE_MAX_LEN];      /* partly received lines, one per player */
+    char inbuf[2][LINE_MAX_LEN];      
     size_t inlen[2] = { 0, 0 };
 
     while (!m->is_over(m->self)) {
         struct pollfd pfd[2] = { { s->fds[0], POLLIN, 0 }, { s->fds[1], POLLIN, 0 } };
-        int ready = poll(pfd, 2, -1);   /* -1 means wait indefinitely (untimed turns) */
+        int ready = poll(pfd, 2, -1);   
         if (ready < 0) {
             if (errno == EINTR) continue;
             perror("poll() failed");
@@ -562,7 +467,7 @@ static void play_classic(Session *s) {
             if (!(pfd[p].revents & (POLLIN | POLLHUP | POLLERR))) continue;
 
             ssize_t n = recv(s->fds[p], inbuf[p] + inlen[p], LINE_MAX_LEN - 1 - inlen[p], 0);
-            if (n <= 0) {   /* the player disconnected: the other player wins */
+            if (n <= 0) {   
                 m->on_forfeit(m->self, p, 0);
                 send_fmt(s->fds[1 - p], "\nPlayer %d left the game.\n", p);
                 announce_game_over(s, "A player left the match.");
@@ -570,7 +475,7 @@ static void play_classic(Session *s) {
             }
             inlen[p] += (size_t)n;
 
-            /* Take every complete line out of the buffer. */
+          
             char *newline;
             while ((newline = memchr(inbuf[p], '\n', inlen[p])) != NULL) {
                 *newline = '\0';
@@ -587,15 +492,6 @@ static void play_classic(Session *s) {
     }
 }
 
-/* ======== 8. BLITZ MATCH ======== */
-
-/**
- * The Blitz match, from the coin flip to the final result.
- *
- * Every loop turn: read the clock once, ask the referee how long until the
- * next deadline, and sleep in poll() for at most that long. Wake up for a
- * guess, a disconnect, or the deadline.
- */
 static void play_blitz(Session *s) {
     /* Each player gets their own chain. game_init copies the words. */
     if (game_init(&s->game, s->chain, s->chain_len, s->chain1, s->chain1_len) != GAME_OK) {

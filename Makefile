@@ -44,7 +44,7 @@ SRC     = src
 CORE    = core
 
 # Every .c file the server needs to link into one program
-SERVER_SRC = server/server.c $(SRC)/session.c $(SRC)/game.c \
+SERVER_SRC = server/server.c $(SRC)/session.c $(SRC)/game.c $(CORE)/ascii_art.c \
              $(CORE)/blitz_mode.c $(CORE)/classic_mode.c $(CORE)/word_bank.c
 
 # --- Targets ----------------------------------------------------------------

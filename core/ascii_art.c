@@ -212,7 +212,13 @@ static const char *font_Z[FONT_HEIGHT] = {
     " ▀▀▀▀",
     "     "
 };
-
+static const char *font_underscore[FONT_HEIGHT] = {
+    "     ",
+    "     ",
+    "     ",
+    "▀▀▀▀▀",
+    "     "
+};
 static const char *font_space[FONT_HEIGHT] = {
     "   ",
     "   ",
@@ -259,6 +265,7 @@ const char *ascii_get_line(char c, int line_num) {
         case 'X': return font_X[line_num];
         case 'Y': return font_Y[line_num];
         case 'Z': return font_Z[line_num];
+        case '_': return font_underscore[line_num];
         default:  return font_space[line_num];
     }
 }
