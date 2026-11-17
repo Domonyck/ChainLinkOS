@@ -29,4 +29,14 @@ const char *ascii_art_announce_you_lose(void)
         "██ ██ ██ ██ ██ ██  ██  ██ ██  ▀▀█▄ ██▀▀ \n"
         " ▀▀██  ▀▀▀   ▀▀▀   ▀▀▀  ▀▀▀  ▀▀▀▀   ▀▀▀ \n"
         "  ▀▀                                    \n";
-};
+}
+
+const char *ascii_art_announce_it_is_a_tie(void)
+{
+    return
+        "                                          \n"
+        "▀▀ ▄██▄   ▀▀ ▄█▀▀▀   ▄█▀█▄   ▄██▄ ▀▀ ▄█▀█▄\n"
+        "█▄  ██    █▄  ▀▀█▄   ██▀██    ██  █▄ ██▀▀ \n"
+        "▀▀  ▀▀    ▀▀ ▀▀▀▀    ▀▀ ▀▀    ▀▀  ▀▀  ▀▀▀ \n"
+        "                                          \n";
+}

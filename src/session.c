@@ -387,7 +387,7 @@ static void announce_game_over(Session *s, const char *reason) {
 send_fmt(s->fds[p], "%s\nScores: player 0 = %d, player 1 = %d\n",
          reason, get_score(&s->game, 0), get_score(&s->game, 1));
         if (winner == -1)
-            send_text(s->fds[p], "It's a tie - both players win!\n");
+            send_text(s->fds[p], ascii_art_announce_it_is_a_tie());
         else if (winner == p)
             send_text(s->fds[p], ascii_art_announce_you_win());
         else
