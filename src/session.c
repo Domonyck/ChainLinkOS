@@ -7,6 +7,7 @@
 #include "blitz_mode.h"
 #include "classic_mode.h"
 #include "ascii_art.h"
+#include "ascii_art_announce.h"
 #include <errno.h>     
 #include <limits.h>   
 #include <poll.h>      
@@ -379,12 +380,18 @@ static void announce_game_over(Session *s, const char *reason) {
     int winner = s->referee.winner(s->referee.self);
 
     for (int p = 0; p < 2; p++) {
-        send_fmt(s->fds[p], "\n=== GAME OVER ===\n%s\nScores: player 0 = %d, player 1 = %d\n",
-                 reason, get_score(&s->game, 0), get_score(&s->game, 1));
+        send_text(s->fds[p], "\n");
+        send_text(s->fds[p], ascii_art_announce_game_over());
+        send_text(s->fds[p], "\n");
 
-        if (winner == -1)      send_text(s->fds[p], "It's a tie - both players win!\n");
-        else if (winner == p)  send_text(s->fds[p], "You win!\n");
-        else                   send_text(s->fds[p], "You lose.\n");
+send_fmt(s->fds[p], "%s\nScores: player 0 = %d, player 1 = %d\n",
+         reason, get_score(&s->game, 0), get_score(&s->game, 1));
+        if (winner == -1)
+            send_text(s->fds[p], "It's a tie - both players win!\n");
+        else if (winner == p)
+            send_text(s->fds[p], ascii_art_announce_you_win());
+        else
+            send_text(s->fds[p], ascii_art_announce_you_lose());
     }
 }
 
