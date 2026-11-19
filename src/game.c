@@ -7,6 +7,7 @@ It only ever says “this is correct” or “this is the current state”. Deci
 #include "../include/game.h"
 
 #include <ctype.h>      // isspace, tolower
+#include <stdbool.h>
 #include <stdlib.h>     // malloc, calloc, free
 #include <string.h>     // strlen, memcpy, memset, strcmp
 
@@ -19,19 +20,24 @@ static char *str_dup(const char *s) {
     return copy;
 }
 
-// trim whitespaces from both sides and lowercase i.e. normalization
+// trim whitespace from both sides, squash any run of inner whitespace into one
+// space, and lowercase i.e. normalization ("Ice   Cream " -> "ice cream")
 static char *normalize(const char *s) {
-    const char *start = s;
-    while (*start && isspace((unsigned char)*start)) start++;     /* skip leading space */
- 
-    size_t len = strlen(start);
-    while (len > 0 && isspace((unsigned char)start[len - 1])) len--;  /* drop trailing space */
- 
+    size_t len = strlen(s);
     char *out = malloc(len + 1);
     if (!out) return NULL;
-    for (size_t i = 0; i < len; i++)
-        out[i] = (char)tolower((unsigned char)start[i]);
-    out[len] = '\0';
+
+    size_t k = 0;
+    bool pending_space = false;
+    for (size_t i = 0; i < len; i++) {
+        if (isspace((unsigned char)s[i])) {
+            pending_space = (k > 0);                 /* ignore leading space */
+            continue;
+        }
+        if (pending_space) { out[k++] = ' '; pending_space = false; }   /* trailing space never written */
+        out[k++] = (char)tolower((unsigned char)s[i]);
+    }
+    out[k] = '\0';
     return out;
 }
 
@@ -93,6 +99,8 @@ GameStatus game_init(Game *g, const char *const *words0, size_t n0, const char *
         return stat;                                                // return the error status
     }
 	for (int i = 0; i < 2; i++) {
+        // Free first word. A one-word chain gets none: giving it the free word
+        // would finish the player before the match starts.
         if (g->players[i].chain_len > 1) {
             g->players[i].position = 1;  // Start pointing at the 2nd word (index 1)
             g->players[i].score = 1;     // Give them 1 point for the free first word

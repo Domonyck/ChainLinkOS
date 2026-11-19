@@ -18,6 +18,7 @@
 #include <string.h>
 #include <signal.h>     /* signal, SIGPIPE */
 #include <time.h>       /* time */
+#include <fcntl.h>      /* open */
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -39,6 +40,20 @@ static int accept_player(int server_sock, int player_no) {
     return fd;
 }
 
+/* A seed that differs on every run. time(NULL) alone changes only once a second
+   and, on macOS, gives patterned first rand() values, so mix in /dev/urandom
+   (falling back to the clock and process id if it cannot be read). */
+static unsigned make_seed(void) {
+    unsigned seed = 0;
+    int fd = open("/dev/urandom", O_RDONLY);
+    if (fd >= 0) {
+        ssize_t n = read(fd, &seed, sizeof seed);
+        close(fd);
+        if (n == (ssize_t)sizeof seed) return seed;
+    }
+    return (unsigned)time(NULL) ^ ((unsigned)getpid() << 16);
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s port_no\n", argv[0]);
@@ -52,7 +67,7 @@ int main(int argc, char *argv[]) {
 
     /* Seed the random number generator once, so the coin flip and the random
        chain pick are different every run. */
-    srand((unsigned) time(NULL));
+    srand(make_seed());
 
     /* 1. Create a TCP socket. */
     int server_sock = socket(AF_INET, SOCK_STREAM, 0);

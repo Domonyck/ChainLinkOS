@@ -272,9 +272,65 @@ static int coin_flip(Session *s) {
     return first;
 }
 
+/*
+ * The big arrow that marks the word the player is guessing now.
+ *
+ * It is drawn in the same block style as the letters and is as tall as a
+ * letter (ascii_get_height() rows), pointing right, in bold yellow:
+ *
+ *     ██
+ *     ████
+ *     ██████
+ *     ████
+ *     ██
+ *
+ * Words that are not being guessed get blank space of the same width, so every
+ * word stays lined up.
+ */
+#define ARROW_COLOR "\033[1;93m"
+#define COLOR_RESET "\033[0m"
+#define BLOCK       "█"          /* 3 bytes in UTF-8 */
+#define BLOCK_BYTES 3
+#define ARROW_MAX_COLS 16        /* widest arrow we ever draw (a font up to 15 rows tall) */
+#define MARKER_COLS(h) (2 * (((h) - 1) / 2 + 1) + 1)   /* arrow width + one gap column */
+#define MARKER_MAX_BYTES (sizeof ARROW_COLOR + sizeof COLOR_RESET + ARROW_MAX_COLS * BLOCK_BYTES + 2)
+
+/* Write the marker for one row of a word (arrow row when `current`, blank otherwise). Returns bytes written. */
+static size_t write_marker(char *out, int row, int h, bool current) {
+    int mid = (h - 1) / 2;
+    int max_width = 2 * (mid + 1);
+    size_t k = 0;
+
+    if (!current) {
+        for (int i = 0; i < max_width + 1; i++) out[k++] = ' ';
+        return k;
+    }
+
+    int dist = row > mid ? row - mid : mid - row;
+    int width = 2 * (mid + 1 - dist);                /* 2, 4, 6, 4, 2 for a 5-row font */
+
+    memcpy(out + k, ARROW_COLOR, sizeof ARROW_COLOR - 1);
+    k += sizeof ARROW_COLOR - 1;
+    for (int i = 0; i < width; i++) {
+        memcpy(out + k, BLOCK, BLOCK_BYTES);
+        k += BLOCK_BYTES;
+    }
+    memcpy(out + k, COLOR_RESET, sizeof COLOR_RESET - 1);
+    k += sizeof COLOR_RESET - 1;
+    for (int i = width; i < max_width + 1; i++) out[k++] = ' ';   /* pad to full width + gap */
+    return k;
+}
+
 static char *render_ascii_view(const char *view) {
     int h = ascii_get_height();
-    size_t cap = strlen(view) * (size_t)h * 26 + 64;
+    if (h < 1 || h > 15) return NULL;
+
+    size_t lines = 1;
+    for (const char *c = view; *c != '\0'; c++)
+        if (*c == '\n') lines++;
+
+    /* per row: the marker, up to 26 bytes per letter, and the newline */
+    size_t cap = (size_t)h * (lines * (MARKER_MAX_BYTES + 1) + strlen(view) * 26) + 64;
     char *out = malloc(cap);
     if (!out) return NULL;
     size_t k = 0;
@@ -285,20 +341,18 @@ static char *render_ascii_view(const char *view) {
         if (!end) end = line + strlen(line);
 
         bool current = (line[0] == '>');
-        const char *word = line + 2;                 
-        size_t wlen = (size_t)(end - word);
+        const char *word = line + 2;
+        size_t wlen = end > word ? (size_t)(end - word) : 0;
 
         for (int row = 0; row < h; row++) {
-            const char *marker = (current && row == h / 2) ? "> " : "  ";
-            memcpy(out + k, marker, 2);
-            k += 2;
+            k += write_marker(out + k, row, h, current);
 
             for (size_t i = 0; i < wlen; i++) {
                 const char *piece = ascii_get_line(word[i], row);
                 size_t n = strlen(piece);
                 memcpy(out + k, piece, n);
                 k += n;
-                out[k++] = ' ';                      
+                out[k++] = ' ';
             }
             out[k++] = '\n';
         }
@@ -406,7 +460,12 @@ static bool handle_line(Session *s, int player, const char *line, bool out[2]) {
     }
 
     if (r.kind == RESULT_GAME_OVER) {
-        announce_game_over(s, "A player completed their word list!");
+        /* GAME_OVER has two causes here: someone finished their list, or (Blitz) a
+           late guess landed after the last running clock had already expired. */
+        if (is_game_finished(&s->game, r.player))
+            announce_game_over(s, "A player completed their word list!");
+        else
+            announce_game_over(s, "Both players ran out of time.");
         return true;
     }
 
