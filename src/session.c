@@ -49,6 +49,9 @@ struct Session {
 
     Game game;           
     Mode referee;      
+
+    int  chooser;         /* player who picks the mode / list source: 0 first, then the last winner */
+    bool can_continue;    /* the round ended normally (nobody left), so a rematch can be offered */
 };
 
 
@@ -63,16 +66,27 @@ Session *create_session(int fd0, int fd1) {
     return s;  
 }
 
-void destroy_session(Session *s) {
-    if (s == NULL) return;
-
+/* Throw away everything one round created so the next round starts clean.
+   Safe on a round that never got as far as creating a referee or a game. */
+static void reset_round(Session *s) {
     if (s->mode == MODE_BLITZ) {
         destroy_blitz_mode(&s->referee);  
     } else {
         destroy_classic_mode(&s->referee);
     }
+    memset(&s->referee, 0, sizeof s->referee);
     free_game(&s->game);              
-    wb_free(s->bank);                 
+    wb_free(s->bank);
+    s->bank = NULL;
+    s->chain = s->chain1 = NULL;
+    s->chain_len = s->chain1_len = 0;
+    s->source = LIST_GAME_MASTER;
+}
+
+void destroy_session(Session *s) {
+    if (s == NULL) return;
+
+    reset_round(s);
     free(s);
 }
 static void send_text(int fd, const char *text) {
@@ -201,13 +215,14 @@ static int load_chain(Session *s) {
 }
 
 static int ask_mode(Session *s) {
-    send_text(s->fds[0], "\nChoose a mode: type 1 for Classic or 2 for Blitz\ninput: ");
-    send_text(s->fds[1], "\nPlayer 0 is choosing the game mode...\n");
+    int c = s->chooser;
+    send_text(s->fds[c], "\nChoose a mode: type 1 for Classic or 2 for Blitz\ninput: ");
+    send_fmt(s->fds[1 - c], "\nPlayer %d is choosing the game mode...\n", c);
 
     char line[LINE_MAX_LEN];
     for (;;) {
-        if (read_line_blocking(s->fds[0], line, sizeof line) != 0) {
-            send_text(s->fds[1], "\nPlayer 0 left the game.\n");
+        if (read_line_blocking(s->fds[c], line, sizeof line) != 0) {
+            send_fmt(s->fds[1 - c], "\nPlayer %d left the game.\n", c);
             return -1;
         }
         trim_lower(line);
@@ -215,18 +230,19 @@ static int ask_mode(Session *s) {
         if (strcmp(line, "1") == 0 || strcmp(line, "classic") == 0) { s->mode = MODE_CLASSIC; return 0; }
         if (strcmp(line, "2") == 0 || strcmp(line, "blitz") == 0)   { s->mode = MODE_BLITZ;   return 0; }
 
-        send_text(s->fds[0], "Please type 1 or 2.\ninput: ");
+        send_text(s->fds[c], "Please type 1 or 2.\ninput: ");
     }
 }
 
 static int ask_source(Session *s) {
-    send_text(s->fds[0], "\nChoose word list option:\n1. Server Game Master List\n2. Players generate own 5-word list\ninput: ");
-    send_text(s->fds[1], "\nPlayer 0 is choosing the word list option...\n");
+    int c = s->chooser;
+    send_text(s->fds[c], "\nChoose word list option:\n1. Server Game Master List\n2. Players generate own 5-word list\ninput: ");
+    send_fmt(s->fds[1 - c], "\nPlayer %d is choosing the word list option...\n", c);
 
     char line[LINE_MAX_LEN];
     for (;;) {
-        if (read_line_blocking(s->fds[0], line, sizeof line) != 0) {
-            send_text(s->fds[1], "\nPlayer 0 left the game.\n");
+        if (read_line_blocking(s->fds[c], line, sizeof line) != 0) {
+            send_fmt(s->fds[1 - c], "\nPlayer %d left the game.\n", c);
             return -1;
         }
         trim_lower(line);
@@ -234,7 +250,7 @@ static int ask_source(Session *s) {
         if (strcmp(line, "1") == 0) { s->source = LIST_GAME_MASTER; return 0; }
         if (strcmp(line, "2") == 0) { s->source = LIST_PLAYER;      return 0; }
 
-        send_text(s->fds[0], "Please type 1 or 2.\ninput: ");
+        send_text(s->fds[c], "Please type 1 or 2.\ninput: ");
     }
 }
 
@@ -466,6 +482,7 @@ static bool handle_line(Session *s, int player, const char *line, bool out[2]) {
             announce_game_over(s, "A player completed their word list!");
         else
             announce_game_over(s, "Both players ran out of time.");
+        s->can_continue = true;
         return true;
     }
 
@@ -614,6 +631,7 @@ static void play_blitz(Session *s) {
             if (r.kind == RESULT_IGNORED) continue;   /* only the one-second tick woke us: redrawn at the top of the loop */
             if (r.kind == RESULT_GAME_OVER) {
                 announce_game_over(s, "Both players ran out of time.");
+                s->can_continue = true;
                 return;
             }
             if (r.kind == RESULT_PLAYER_OUT) out[r.player] = true;
@@ -654,27 +672,87 @@ static void play_blitz(Session *s) {
 
 /* ======== 9. RUNNING ======== */
 
+/* Throw away anything a player typed while they were only waiting, so it is not
+   mistaken for an answer to the next question. */
+static void drain_input(int fd) {
+    char buf[256];
+    while (recv(fd, buf, sizeof buf, MSG_DONTWAIT) > 0) { }
+}
+
+/* The winner chooses: 1 = play again (then pick a mode), 2 = exit.
+   Returns 1 for another game, 0 for exit, -1 if the winner left. On a tie the
+   server picks who decides at random. Also sets s->chooser to that player. */
+static int ask_rematch(Session *s, int winner) {
+    int c = (winner == 0 || winner == 1) ? winner : pick_caller();
+    s->chooser = c;
+
+    for (int p = 0; p < 2; p++) send_text(s->fds[p], "\033[r");   /* give the screen back to normal scrolling */
+
+    if (winner == -1) {
+        send_fmt(s->fds[c], "\nIt was a tie, so you were picked at random to decide.\n");
+        send_fmt(s->fds[1 - c], "\nIt was a tie, so Player %d was picked at random to decide.\n", c);
+    }
+    send_text(s->fds[c], "\nPlay another game?\n1. Yes, choose a mode\n2. Exit\ninput: ");
+    send_fmt(s->fds[1 - c], "\nWaiting for Player %d to choose: play again or exit...\n", c);
+    drain_input(s->fds[c]);   /* ignore keystrokes typed during the final screen */
+
+    char line[LINE_MAX_LEN];
+    for (;;) {
+        if (read_line_blocking(s->fds[c], line, sizeof line) != 0) {
+            send_fmt(s->fds[1 - c], "\nPlayer %d left the game.\n", c);
+            return -1;
+        }
+        trim_lower(line);
+
+        if (strcmp(line, "1") == 0 || strcmp(line, "y") == 0 || strcmp(line, "yes") == 0) return 1;
+        if (strcmp(line, "2") == 0 || strcmp(line, "exit") == 0 || strcmp(line, "n") == 0 || strcmp(line, "no") == 0) return 0;
+
+        send_text(s->fds[c], "Please type 1 or 2.\ninput: ");
+    }
+}
+
 void run_session(Session *s) {
     if (s == NULL) return;
 
-    /* Setup: which mode? */
-    if (ask_mode(s) != 0) return;
+    for (;;) {
+        s->can_continue = false;
 
-    /* Setup: which word list source? (Classic mode only) */
-    if (s->mode == MODE_CLASSIC) {
-        if (ask_source(s) != 0) return;
-    }
+        /* Setup: which mode? (the previous winner chooses; player 0 the first time) */
+        if (ask_mode(s) != 0) return;
 
-    /* Pick the word chain for this match. */
-    if (load_chain(s) != 0) {
-        send_text(s->fds[0], "\nThe server could not load the word list.\n");
-        send_text(s->fds[1], "\nThe server could not load the word list.\n");
-        return;
-    }
+        /* Setup: which word list source? (Classic mode only) */
+        if (s->mode == MODE_CLASSIC) {
+            if (ask_source(s) != 0) return;
+        }
 
-    if (s->mode == MODE_BLITZ) {
-        play_blitz(s);
-    } else {
-        play_classic(s);
+        /* Pick the word chain for this match. */
+        if (load_chain(s) != 0) {
+            send_text(s->fds[0], "\nThe server could not load the word list.\n");
+            send_text(s->fds[1], "\nThe server could not load the word list.\n");
+            return;
+        }
+
+        if (s->mode == MODE_BLITZ) {
+            play_blitz(s);
+        } else {
+            play_classic(s);
+        }
+
+        /* Someone left or setup failed: nobody is left to ask. */
+        if (!s->can_continue) return;
+
+        int again = ask_rematch(s, s->referee.winner(s->referee.self));
+        if (again < 0) return;
+        if (again == 0) {
+            for (int p = 0; p < 2; p++) send_text(s->fds[p], "\nThanks for playing ChainLink! Goodbye.\n");
+            return;
+        }
+
+        /* New round: wipe the old game and clear both screens. */
+        reset_round(s);
+        for (int p = 0; p < 2; p++) {
+            drain_input(s->fds[p]);
+            send_text(s->fds[p], "\033[r\033[2J\033[H");
+        }
     }
 }

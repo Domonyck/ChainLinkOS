@@ -94,7 +94,7 @@ static Result blitz_on_guess(void *self, int player, const char *guess, long lon
             s->finisher = player;
             return make_result(RESULT_GAME_OVER, player, -1);
         }
-        keeps the turn of the active player
+        // keeps the turn of the active player
         return make_result(RESULT_CORRECT, player, player);     
     }
 
@@ -115,22 +115,25 @@ static Result blitz_on_guess(void *self, int player, const char *guess, long lon
     return make_result(RESULT_WRONG, player, other);
 }
 
-// ...
+// called by the server when the poll() wait ends with no input, to check if the active clock ran out
+// poll() is the watcher of sockets that came from session.c
 static Result blitz_on_timeout(void *self, long long now_ms) {
     BlitzState *s = self;
 
-    if (!s->started || s->over || now_ms < s->deadline)         /* nothing is due */
+    // session not running, or session is over, or the deadline has not arrived yet, IGNORED (nothing is due)
+    if (!s->started || s->over || now_ms < s->deadline)         
         return make_result(RESULT_IGNORED, -1, current_turn(s));
 
+    // the deadline has arrived, so the active player's clock ran out
     return expire_active(s, now_ms);
 }
 
-// ...
+// a player left the match (disconnected), so the player who stayed wins
 static Result blitz_on_forfeit(void *self, int player, long long now_ms) {
     BlitzState *s = self;
     (void)now_ms;   // a forfeit does not depend on the time
 
-    // if session not running and player not vaid, return INGORE.
+    // if session not running, or session is over, or player is not valid, IGNORED.
     if (!s->started || s->over || (player != 0 && player != 1))
         return make_result(RESULT_IGNORED, player, current_turn(s));
 
@@ -142,52 +145,67 @@ static Result blitz_on_forfeit(void *self, int player, long long now_ms) {
     return make_result(RESULT_GAME_OVER, player, -1);
 }
 
-// ...
+// tells the server how long it can wait in poll() before the active clock runs out
+// poll() is the watcher of sockets that came from session
 static long long blitz_ms_until_deadline(const void *self, long long now_ms) {
     const BlitzState *s = self;
 
-    if (!s->started || s->over) return -1;      /* nothing to wait for */
+    // session not running or session is over, nothing to wait for (-1)
+    if (!s->started || s->over) return -1;
 
+    // milliseconds left until the active player's deadline
     long long ms = s->deadline - now_ms;
-    return ms > 0 ? ms : 0;                     /* 0 = something is due now */
+    // 0 means the deadline already passed, so something is due now
+    return ms > 0 ? ms : 0;
 }
 
+// checks if the match ended
 static bool blitz_is_over(const void *self) {
     const BlitzState *s = self;
     return s->over;
 }
 
+// decides the winner of the match: -1 if the match is not over yet or it is a tie
 static int blitz_winner(const void *self) {
     const BlitzState *s = self;
 
+    // the match is not over yet, no winner
     if (!s->over) return -1;
-    if (s->forfeiter != -1) return 1 - s->forfeiter;    /* the player who stayed */
-    if (s->finisher != -1) return s->finisher;          /* completed their list */
+    // a player left, so the player who stayed wins
+    if (s->forfeiter != -1) return 1 - s->forfeiter;
+    // a player completed their list, so they win
+    if (s->finisher != -1) return s->finisher;
 
+    // both clocks ran out, so the higher score wins
     int a = get_score(s->game, 0);
     int b = get_score(s->game, 1);
     if (a > b) return 0;
     if (b > a) return 1;
-    return -1;                                          /* tie: both players win */
+
+    // same score: tie, both players win
+    return -1;
 }
 
-/* ======== 4. CREATE / DESTROY ======== */
-
+// create the blitz mode, hook its functions to the Mode table, and give it the session's game
 bool create_blitz_mode(Mode *mode, Game *game) {
+    // validate the arguments before creating anything
     if (mode == NULL) return false;
     mode->self = NULL;
     if (game == NULL) return false;
 
-    /* calloc zeroes everything; finisher and forfeiter need -1, set below. */
+    // calloc zeroes everything; finisher and forfeiter need -1, set below
     BlitzState *s = calloc(1, sizeof *s);
     if (s == NULL) return false;
 
     s->game = game;
+
+    // each player starts with a full clock
     s->time_left[0] = BLITZ_TIME_MS;
     s->time_left[1] = BLITZ_TIME_MS;
     s->finisher = -1;
     s->forfeiter = -1;
 
+    // hook the private functions to the Mode table, so the session can only reach them through it
     mode->start             = blitz_start;
     mode->on_guess          = blitz_on_guess;
     mode->on_timeout        = blitz_on_timeout;
@@ -199,21 +217,32 @@ bool create_blitz_mode(Mode *mode, Game *game) {
 
     return true;
 }
+
+// tells the session whose clock is running right now, or -1 if none
 int blitz_active_player(const void *self) {
     const BlitzState *s = self;
     if (s == NULL || !s->started || s->over) return -1;
     return s->active;
 }
 
+// time left in a player's clock in ms, used by the session to redraw the countdown every second
 long long get_time_left(const void *self, int player, long long now_ms) {
     const BlitzState *s = self;
+
+    // not running, or over, no time to show
     if (s == NULL || !s->started || s->over) return 0;
+
+    // the running clock is read from its deadline, so it keeps counting down
     if (s->active == player) {
         long long left = s->deadline - now_ms;
         return left > 0 ? left : 0;
     }
+
+    // a paused clock shows the time saved when it paused
     return s->time_left[player];
 }
+
+// free the mode's private state; the game is only borrowed, so it is not freed here
 void destroy_blitz_mode(Mode *m) {
     if (m == NULL) return;
 
