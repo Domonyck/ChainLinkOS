@@ -1,9 +1,3 @@
-/*
-It holds the state of the match and answers questions about it, and it doesn’t know about networking, clocks or modes.
-
-It only ever says “this is correct” or “this is the current state”. Deciding what that means (who goes next, whether time ran out) belongs to the mode.
-*/
-
 #include "../include/game.h"
 
 #include <ctype.h>      // isspace, tolower

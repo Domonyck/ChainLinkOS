@@ -1,49 +1,29 @@
-/*
-Implementation of the Classic referee declared in classic_mode.h.
-
-Layout of this file:
-    1. ClassicState: the mode's private data (hidden from every other file)
-    2. Small helpers
-    3. The seven Mode functions (all static (private class): reached only through the Mode table)
-    4. create_classic_mode / destroy_classic_mode
-
-Turn handling: untimed, alternating turns. A correct guess keeps the turn,
-while a wrong guess adds a hint and hands over the turn to the opponent.
-*/
-
 #include "classic_mode.h"
-#include <stdlib.h>   /* calloc, free */
-
-/* ======== 1. PRIVATE STATE ======== */
+#include <stdlib.h>  
 
 typedef struct {
-    Game *game;        /**< Borrowed from the session. Never freed here. */
-    bool started;      /**< start() has been called with a valid first player. */
-    bool over;         /**< The match has ended. */
-    int active;        /**< The player whose turn it is. */
-    int winner;        /**< The winner of the match, or -1. */
+    Game *game;     
+    bool started;      
+    bool over;      
+    int active;        
+    int winner;       
 } ClassicState;
-
-/* ======== 2. HELPERS ======== */
 
 static Result make_result(ResultKind kind, int player, int next_player) {
     Result r = { kind, player, next_player };
     return r;
 }
 
-/* Whose turn to report in an IGNORED result: the active player, or -1 if nothing is running. */
 static int current_turn(const ClassicState *s) {
     return (s->started && !s->over) ? s->active : -1;
 }
 
-/* ======== 3. THE MODE FUNCTIONS ======== */
-
 static void classic_start(void *self, int first_player, long long now_ms) {
     ClassicState *s = self;
-    (void)now_ms;   /* Classic mode does not track turn time */
+    (void)now_ms;   
 
-    if (s->started) return;                                 /* already running */
-    if (first_player != 0 && first_player != 1) return;    /* stay unstarted */
+    if (s->started) return;                               
+    if (first_player != 0 && first_player != 1) return;    
 
     s->started = true;
     s->active = first_player;
@@ -53,7 +33,6 @@ static Result classic_on_guess(void *self, int player, const char *guess, long l
     ClassicState *s = self;
     (void)now_ms;
 
-    /* Not running, or not this player's turn: nothing happens. */
     if (!s->started || s->over || player != s->active)
         return make_result(RESULT_IGNORED, player, current_turn(s));
 
@@ -65,10 +44,9 @@ static Result classic_on_guess(void *self, int player, const char *guess, long l
             s->winner = player;
             return make_result(RESULT_GAME_OVER, player, -1);
         }
-        return make_result(RESULT_CORRECT, player, player);     /* keeps the turn */
+        return make_result(RESULT_CORRECT, player, player);    
     }
 
-    /* Wrong (including empty, misspelled, incomplete or NULL): add a hint. */
     add_hint(s->game, player);
 
     int other = 1 - player;
@@ -80,7 +58,6 @@ static Result classic_on_timeout(void *self, long long now_ms) {
     ClassicState *s = self;
     (void)now_ms;
 
-    /* Classic mode has no turn clocks or timeouts. */
     return make_result(RESULT_IGNORED, -1, current_turn(s));
 }
 
@@ -92,7 +69,7 @@ static Result classic_on_forfeit(void *self, int player, long long now_ms) {
         return make_result(RESULT_IGNORED, player, current_turn(s));
 
     s->over = true;
-    s->winner = 1 - player;                                 /* opponent wins */
+    s->winner = 1 - player;                                
     return make_result(RESULT_GAME_OVER, player, -1);
 }
 
@@ -100,7 +77,7 @@ static long long classic_ms_until_deadline(const void *self, long long now_ms) {
     (void)self;
     (void)now_ms;
 
-    return -1;                                              /* nothing to wait for */
+    return -1;                                         
 }
 
 static bool classic_is_over(const void *self) {

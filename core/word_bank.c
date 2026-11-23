@@ -1,12 +1,9 @@
 #include "word_bank.h"
 
-#include <stdio.h>      // fopen, fread, fclose
-#include <stdlib.h>     // malloc, realloc, free, rand
-#include <string.h>     // strlen, strstr, strchr, memcpy
+#include <stdio.h>     
+#include <stdlib.h>     
+#include <string.h>     
 
-/* ======== TYPES ======== */
-
-// A growable list of heap strings
 typedef struct {
     char  **items;
     size_t  count;
@@ -14,13 +11,11 @@ typedef struct {
 } StrList;
 
 struct WordBank {
-    StrList *chains;        // every chain loaded from the "chains" key
+    StrList *chains;        
     size_t   chain_count;
     size_t   chain_cap;
-    StrList  bank;          // the flat list from the "word_bank" key (may be empty)
+    StrList  bank;          
 };
-
-/* ======== INTERNAL HELPERS ======== */
 
 static void list_free(StrList *l) {
     for (size_t i = 0; i < l->count; i++) free(l->items[i]);
@@ -41,7 +36,6 @@ static bool list_push(StrList *l, char *s) {
     return true;
 }
 
-// read a whole file into a null-terminated heap buffer
 static char *read_file(const char *path) {
     FILE *f = fopen(path, "rb");
     if (!f) return NULL;
@@ -65,7 +59,6 @@ static const char *skip_ws(const char *p) {
     return p;
 }
 
-// p points at an opening quote; returns the position after the closing quote
 static const char *parse_string(const char *p, char **out) {
     if (*p != '"') return NULL;
     p++;
@@ -82,7 +75,6 @@ static const char *parse_string(const char *p, char **out) {
     return end + 1;
 }
 
-// p points at '['; fills l with the strings and returns the position after ']'
 static const char *parse_string_list(const char *p, StrList *l) {
     if (*p != '[') return NULL;
     p++;
@@ -99,7 +91,6 @@ static const char *parse_string_list(const char *p, StrList *l) {
     }
 }
 
-// find the '[' that follows a key such as "chains"; NULL if the key is missing
 static const char *find_array(const char *text, const char *key) {
     const char *p = strstr(text, key);
     if (!p) return NULL;
@@ -110,9 +101,8 @@ static const char *find_array(const char *text, const char *key) {
     return (*p == '[') ? p : NULL;
 }
 
-// parse the array of arrays under "chains"
 static bool parse_chains(WordBank *wb, const char *p) {
-    p++;    // skip the outer '['
+    p++;   
 
     for (;;) {
         p = skip_ws(p);
@@ -135,9 +125,6 @@ static bool parse_chains(WordBank *wb, const char *p) {
     }
 }
 
-/* ======== PUBLIC FUNCTIONS ======== */
-
-// load chains (and the optional flat word bank) from a json file; NULL on any failure
 WordBank *wb_load(const char *path) {
     if (!path) return NULL;
 
@@ -153,7 +140,6 @@ WordBank *wb_load(const char *path) {
     const char *bank = find_array(text, "\"word_bank\"");
     if (bank && !parse_string_list(bank, &wb->bank)) goto fail;
 
-    // a file with neither key is useless
     if (wb->chain_count == 0 && wb->bank.count == 0) goto fail;
 
     free(text);
@@ -177,7 +163,6 @@ size_t wb_chain_count(const WordBank *wb) {
     return wb ? wb->chain_count : 0;
 }
 
-// get chain number idx; the result plugs straight into game_init (words, n)
 const char *const *wb_get_chain(const WordBank *wb, size_t idx, size_t *n) {
     if (!wb || idx >= wb->chain_count) {
         if (n) *n = 0;
@@ -187,7 +172,6 @@ const char *const *wb_get_chain(const WordBank *wb, size_t idx, size_t *n) {
     return (const char *const *)wb->chains[idx].items;
 }
 
-// get a random chain (call srand once in main before using this)
 const char *const *wb_get_random_chain(const WordBank *wb, size_t *n) {
     if (!wb || wb->chain_count == 0) {
         if (n) *n = 0;
@@ -200,13 +184,11 @@ size_t wb_bank_count(const WordBank *wb) {
     return wb ? wb->bank.count : 0;
 }
 
-// get word number idx from the flat word bank; NULL if out of range
 const char *wb_get_bank_word(const WordBank *wb, size_t idx) {
     if (!wb || idx >= wb->bank.count) return NULL;
     return wb->bank.items[idx];
 }
 
-// get a random word from the flat word bank
 const char *wb_get_random_bank_word(const WordBank *wb) {
     if (!wb || wb->bank.count == 0) return NULL;
     return wb->bank.items[(size_t)rand() % wb->bank.count];

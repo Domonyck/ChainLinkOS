@@ -3,15 +3,15 @@
 #include <stdlib.h>   // calloc, free
 
 typedef struct {
-    Game *game;               // *game is borrowed from session.c
-    bool started;             // checks if game has started
-    bool over;                // checks if match ended
-    int active;               // the current player who's clock is running
-    long long deadline;       // when will the active player clock run out
-    long long time_left[2];   // the time left in the player's clock when it pauses
-    bool out[2];              // checks who's clock ran out
-    int finisher;             // the player who completes their list, or none
-    int forfeiter;            // the player who left due to server connection issues
+    Game *game;              
+    bool started;          
+    bool over;                
+    int active;            
+    long long deadline;       
+    long long time_left[2];   
+    bool out[2];              
+    int finisher;             
+    int forfeiter;            
 } BlitzState;
 
 static Result make_result(ResultKind kind, int player, int next_player) {
@@ -21,13 +21,9 @@ static Result make_result(ResultKind kind, int player, int next_player) {
 
 // checks who's turn is it
 static int current_turn(const BlitzState *s) {
-    // when game started and is not over, the current turn is the active player, otherwise None (-1)
     return (s->started && !s->over) ? s->active : -1;
 }
 
-// The active player's clock has run out. Mark them out; if the opponent still
-// has time, hand over the turn and start the opponent's clock at now_ms
-// (the moment the server noticed), otherwise the match is over.
 static Result expire_active(BlitzState *s, long long now_ms) {
     // mark the active's player as expired if their clock has run out
     int expired = s->active;

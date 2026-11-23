@@ -1,42 +1,15 @@
-/**
- * @file client.c
- * @brief Player client: connects to the server by IP address and port.
- *
- * Prints everything the server sends and sends every line the player types.
- * select() watches the keyboard and the socket at the same time, so the
- * server can send updates at any moment (not only after you type).
- *
- * Compile: gcc -o client client.c
- * Run:     ./client 192.168.1.10 5000
- */
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <signal.h>     /* signal, SIGINT, SIGTERM */
-#include <time.h>       /* time */
+#include <signal.h>    
+#include <time.h>     
 #include <string.h>
-#include <termios.h>    /* tcgetattr, tcsetattr: raw keyboard mode */
+#include <termios.h>    
 #include <unistd.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-
-/* ======== KEYBOARD: our own line editor ========
- *
- * In the terminal's normal ("cooked") mode the terminal itself edits the line
- * and some keys leak through as visible junk: Ctrl+R shows ^R, forward-Delete
- * shows ^[[3~, and so on. So while playing, the client reads single keys and
- * edits the line itself:
- *
- *     printable key        added to the line and shown
- *     Backspace / Delete   erases the last character (also the forward-Delete code ESC [ 3 ~)
- *     Enter                sends the line to the server
- *     arrows, Ctrl+R ...   ignored (nothing shown, nothing sent)
- *     Ctrl+D (empty line)  quits;  Ctrl+C quits
- *
- * The terminal is put back the way it was when the program ends.
- */
 
 static struct termios saved_term;
 static int term_saved = 0;

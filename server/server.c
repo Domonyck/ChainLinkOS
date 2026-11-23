@@ -1,24 +1,11 @@
-/**
- * @file server.c
- * @brief Entry point of the server (replaces main.c).
- *
- * Opens a TCP port, waits for two players to connect, hands both sockets to
- * a Session (player 0 = first to connect, player 1 = second), runs the match,
- * then cleans up.
- *
- * Without running make -j, do this:
- * Compile: make            (builds server_app)
- * Run:     ./server_app 5000     (from the project root, so data/ is found)
- */
-
 #include "../include/session.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <signal.h>     /* signal, SIGPIPE */
-#include <time.h>       /* time */
-#include <fcntl.h>      /* open */
+#include <signal.h>     
+#include <time.h>       
+#include <fcntl.h>      
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
