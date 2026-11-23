@@ -2,25 +2,6 @@
 // 200809L means "the 2008 POSIX standard", the version that includes both of those functions
 #define _POSIX_C_SOURCE 200809L
 
-/*
-session.c is the "game master": it runs one match between the two connected players.
-
-It is like referee's assistant. It asks the setup questions, flips the coin,
-passes messages between the two players' sockets and the referee (blitz_mode.c or
-classic_mode.c), draws the screens, and announces the result. It never decides
-whether a guess is right (that is game.c) or what a wrong guess costs (that is the mode).
-
-Layout of this file:
-    1. Settings and the session's private data
-    2. Create / reset / destroy
-    3. Small helpers (sending text, the clock, reading a line)
-    4. Setup (word lists, mode, coin flip)
-    5. Drawing (the arrow, the screens, the countdown)
-    6. Announcements and handling one guess
-    7. Playing a Classic match and a Blitz match
-    8. Rematch and running the whole session
-*/
-
 #include "session.h"
 #include "word_bank.h"
 #include "game.h"
@@ -634,7 +615,67 @@ static bool handle_line(Session *s, int player, const char *line, bool out[2]) {
     send_views(s, r.next_player, out);
     return false;
 }
+static void drain_input(int fd) {
+    char buf[256];
+    while (recv(fd, buf, sizeof buf, MSG_DONTWAIT) > 0) { }
+}
+static int ask_rematch(Session *s, int winner) {
+    // c is the player who decides: the winner, or a random player on a tie
+    int c = (winner == 0 || winner == 1) ? winner : pick_caller();
+    s->chooser = c;
 
+    // give the screen back to normal scrolling (Blitz had fixed the top row)
+    for (int p = 0; p < 2; p++) send_text(s->fds[p], "\033[r");
+
+    if (winner == -1) {
+        send_fmt(s->fds[c], "\nIt was a tie, so you were picked at random to decide.\n");
+        send_fmt(s->fds[1 - c], "\nIt was a tie, so Player %d was picked at random to decide.\n", c);
+    }
+    send_text(s->fds[c], "\nPlay another game?\n1. Yes, choose a mode\n2. Exit\ninput: ");
+    send_fmt(s->fds[1 - c], "\nWaiting for Player %d to choose: play again or exit...\n", c);
+    // ignore keystrokes typed during the final screen
+    drain_input(s->fds[c]);
+
+    // keep asking until the answer is valid
+    char line[LINE_MAX_LEN];
+    for (;;) {
+        if (read_line_blocking(s->fds[c], line, sizeof line) != 0) {
+            send_fmt(s->fds[1 - c], "\nPlayer %d left the game.\n", c);
+            return -1;
+        }
+        trim_lower(line);
+
+        if (strcmp(line, "1") == 0 || strcmp(line, "y") == 0 || strcmp(line, "yes") == 0) return 1;
+        if (strcmp(line, "2") == 0 || strcmp(line, "exit") == 0 || strcmp(line, "n") == 0 || strcmp(line, "no") == 0) return 0;
+
+        send_text(s->fds[c], "Please type 1 or 2.\ninput: ");
+    }
+}
+// returns true to start another round, or false to end the session
+static bool finish_or_rematch(Session *s) {
+    // someone left or setup failed: nobody is left to ask
+    if (!s->can_continue) return false;
+
+    // ask the winner (found through the referee) whether to play again or exit
+    int again = ask_rematch(s, s->referee.winner(s->referee.self));
+    if (again < 0) return false;
+
+    // the winner chose to exit: say goodbye to both and stop
+    if (again == 0) {
+        for (int p = 0; p < 2; p++) {
+            send_text(s->fds[p], "\nThanks for playing ChainLink! Goodbye.\n");
+        }
+        return false;
+    }
+
+    // new round: wipe the old game and clear both screens
+    reset_round(s);
+    for (int p = 0; p < 2; p++) {
+        drain_input(s->fds[p]);
+        send_text(s->fds[p], "\033[r\033[2J\033[H");
+    }
+    return true;
+}
 // ======== 7. PLAYING A MATCH ========
 
 // run a whole Classic match: untimed, a wrong guess passes the turn to the opponent
@@ -736,6 +777,7 @@ static void play_classic(Session *s) {
             if (inlen[p] >= LINE_MAX_LEN - 1) inlen[p] = 0;
         }
     }
+    finish_or_rematch(s);
 }
 
 // run a whole Blitz match: every player has a clock, and the clock only runs on their own turn
@@ -848,52 +890,10 @@ static void play_blitz(Session *s) {
             if (inlen[p] >= LINE_MAX_LEN - 1) inlen[p] = 0;
         }
     }
+    finish_or_rematch(s);
 }
 
 // ======== 8. REMATCH AND RUNNING ========
-
-// throw away anything a player typed while they were only waiting, so it is not
-// mistaken for an answer to the next question
-static void drain_input(int fd) {
-    char buf[256];
-    while (recv(fd, buf, sizeof buf, MSG_DONTWAIT) > 0) { }
-}
-
-// after a match, the winner chooses: 1 = play again (then pick a mode), 2 = exit
-// returns 1 for another game, 0 for exit, -1 if the winner left
-// on a tie, the server picks who decides at random; the decider is saved in s->chooser
-static int ask_rematch(Session *s, int winner) {
-    // c is the player who decides: the winner, or a random player on a tie
-    int c = (winner == 0 || winner == 1) ? winner : pick_caller();
-    s->chooser = c;
-
-    // give the screen back to normal scrolling (Blitz had fixed the top row)
-    for (int p = 0; p < 2; p++) send_text(s->fds[p], "\033[r");
-
-    if (winner == -1) {
-        send_fmt(s->fds[c], "\nIt was a tie, so you were picked at random to decide.\n");
-        send_fmt(s->fds[1 - c], "\nIt was a tie, so Player %d was picked at random to decide.\n", c);
-    }
-    send_text(s->fds[c], "\nPlay another game?\n1. Yes, choose a mode\n2. Exit\ninput: ");
-    send_fmt(s->fds[1 - c], "\nWaiting for Player %d to choose: play again or exit...\n", c);
-    // ignore keystrokes typed during the final screen
-    drain_input(s->fds[c]);
-
-    // keep asking until the answer is valid
-    char line[LINE_MAX_LEN];
-    for (;;) {
-        if (read_line_blocking(s->fds[c], line, sizeof line) != 0) {
-            send_fmt(s->fds[1 - c], "\nPlayer %d left the game.\n", c);
-            return -1;
-        }
-        trim_lower(line);
-
-        if (strcmp(line, "1") == 0 || strcmp(line, "y") == 0 || strcmp(line, "yes") == 0) return 1;
-        if (strcmp(line, "2") == 0 || strcmp(line, "exit") == 0 || strcmp(line, "n") == 0 || strcmp(line, "no") == 0) return 0;
-
-        send_text(s->fds[c], "Please type 1 or 2.\ninput: ");
-    }
-}
 
 // run the whole session: setup, a match, then the rematch question, again and again until someone exits
 void run_session(Session *s) {
@@ -927,21 +927,5 @@ void run_session(Session *s) {
 
         // someone left or setup failed: nobody is left to ask
         if (!s->can_continue) return;
-
-        // ask the winner (found through the referee) whether to play again or exit
-        int again = ask_rematch(s, s->referee.winner(s->referee.self));
-        if (again < 0) return;
-        // the winner chose to exit: say goodbye to both and stop
-        if (again == 0) {
-            for (int p = 0; p < 2; p++) send_text(s->fds[p], "\nThanks for playing ChainLink! Goodbye.\n");
-            return;
-        }
-
-        // new round: wipe the old game and clear both screens
-        reset_round(s);
-        for (int p = 0; p < 2; p++) {
-            drain_input(s->fds[p]);
-            send_text(s->fds[p], "\033[r\033[2J\033[H");
-        }
     }
 }
