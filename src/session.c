@@ -286,11 +286,12 @@ static int load_chain(Session *s) {
     return 0;
 }
 
-// ask the chooser which mode to play; the other player waits. 0 on success, -1 if the chooser left
+// ask the chooser which mode to play, or to quit; the other player waits
+// returns 0 when a mode was picked, 1 if the chooser chose to quit, -1 if the chooser left
 static int ask_mode(Session *s) {
     // c is the chooser: player 0 the first time, then the previous winner
     int c = s->chooser;
-    send_text(s->fds[c], "\nChoose a mode: type 1 for Classic or 2 for Blitz\ninput: ");
+    send_text(s->fds[c], "\nChoose an option:\n1. Classic\n2. Blitz\n3. Quit\ninput: ");
     send_fmt(s->fds[1 - c], "\nPlayer %d is choosing the game mode...\n", c);
 
     // keep asking until the answer is valid
@@ -304,8 +305,10 @@ static int ask_mode(Session *s) {
 
         if (strcmp(line, "1") == 0 || strcmp(line, "classic") == 0) { s->mode = MODE_CLASSIC; return 0; }
         if (strcmp(line, "2") == 0 || strcmp(line, "blitz") == 0)   { s->mode = MODE_BLITZ;   return 0; }
+        // quitting from the menu ends the whole session for both players
+        if (strcmp(line, "3") == 0 || strcmp(line, "quit") == 0 || strcmp(line, "q") == 0) return 1;
 
-        send_text(s->fds[c], "Please type 1 or 2.\ninput: ");
+        send_text(s->fds[c], "Please type 1, 2 or 3.\ninput: ");
     }
 }
 
@@ -777,7 +780,6 @@ static void play_classic(Session *s) {
             if (inlen[p] >= LINE_MAX_LEN - 1) inlen[p] = 0;
         }
     }
-    finish_or_rematch(s);
 }
 
 // run a whole Blitz match: every player has a clock, and the clock only runs on their own turn
@@ -890,7 +892,6 @@ static void play_blitz(Session *s) {
             if (inlen[p] >= LINE_MAX_LEN - 1) inlen[p] = 0;
         }
     }
-    finish_or_rematch(s);
 }
 
 // ======== 8. REMATCH AND RUNNING ========
@@ -903,8 +904,15 @@ void run_session(Session *s) {
     for (;;) {
         s->can_continue = false;
 
-        // setup: which mode? (the previous winner chooses; player 0 the first time)
-        if (ask_mode(s) != 0) return;
+        // setup: which mode, or quit? (the previous winner chooses; player 0 the first time)
+        int picked = ask_mode(s);
+        if (picked < 0) return;
+        if (picked == 1) {
+            // the chooser quit: tell the other player who did, say goodbye to both, and stop
+            send_fmt(s->fds[1 - s->chooser], "\nPlayer %d chose to quit.\n", s->chooser);
+            for (int p = 0; p < 2; p++) send_text(s->fds[p], "\nThanks for playing ChainLink! Goodbye.\n");
+            return;
+        }
 
         // setup: which word list source? (Classic mode only)
         if (s->mode == MODE_CLASSIC) {
@@ -925,7 +933,8 @@ void run_session(Session *s) {
             play_classic(s);
         }
 
-        // someone left or setup failed: nobody is left to ask
-        if (!s->can_continue) return;
+        // after the match: ask the winner to play again or exit (this also resets the round for the next one)
+        // returns false when someone left or exited, so the session ends
+        if (!finish_or_rematch(s)) return;
     }
 }
