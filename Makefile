@@ -33,6 +33,9 @@
 #     - Never name an output "server" or "client": those are folders.
 #     - "undefined reference" means a .c file is missing from SERVER_SRC.
 #     - Only ONE file may contain main() per program.
+
+# run server: gcc -std=c99 -Wall -Wextra -Iinclude -o server_app server/server.c src/session.c src/game.c core/ascii_art.c core/ascii_art_announce.c core/blitz_mode.c core/classic_mode.c core/word_bank.c
+# run client: gcc -std=c99 -Wall -Wextra -Iinclude -o client_app server/client.c
 # ============================================================================
 
 # --- Settings ---------------------------------------------------------------
