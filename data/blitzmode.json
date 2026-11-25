@@ -19,6 +19,15 @@
     ["foot", "ball", "game", "show", "case", "study", "group", "photo", "copy", "cat", "fish", "bowl", "cut", "off", "shore", "line", "up", "grade", "school", "bus", "stop", "watch", "dog", "house", "boat"],
     ["fire", "wall", "paper", "work", "book", "mark", "down", "town", "hall", "way", "side", "walk", "out", "door", "bell", "boy", "friend", "ship", "yard", "stick", "shift", "key", "word", "play", "back"],
     ["birth", "day", "dream", "team", "work", "book", "mark", "down", "town", "house", "fly", "wheel", "chair", "man", "hole", "punch", "line", "up", "side", "walk", "out", "door", "bell", "boy", "friend"],
-    ["rain", "drop", "out", "side", "kick", "start", "up", "set", "back", "fire", "man", "power", "house", "boat", "race", "car", "pool", "table", "top", "hat", "trick", "shot", "gun", "fire", "arm"]
+    ["rain", "drop", "out", "side", "kick", "start", "up", "set", "back", "fire", "man", "power", "house", "boat", "race", "car", "pool", "table", "top", "hat", "trick", "shot", "gun", "fire", "arm"],
+    ["hand", "stand", "by", "pass", "word", "play", "ground", "work", "book", "shelf", "life", "guard", "dog", "house", "boat", "race", "car", "pool", "side", "walk", "out", "door", "step", "mother", "board"],
+    ["ice", "cream", "cheese", "cake", "walk", "out", "law", "suit", "case", "study", "hall", "way", "side", "line", "dance", "floor", "board", "game", "show", "down", "town", "house", "boat", "race", "car"],
+    ["tooth", "pick", "up", "hill", "top", "secret", "code", "name", "tag", "team", "work", "shop", "lift", "off", "beat", "box", "car", "wash", "out", "door", "way", "point", "guard", "rail", "road"],
+    ["hair", "band", "wagon", "wheel", "chair", "lift", "off", "beat", "box", "office", "work", "day", "light", "house", "fly", "paper", "back", "yard", "stick", "shift", "key", "board", "game", "play", "ground"],
+    ["cow" ,"milk", "chocolate", "bar", "bell", "pepper", "mint", "tea", "time", "out", "line", "up", "grade", "school", "bus", "stop", "watch", "dog", "house", "work", "book", "mark", "down", "town", "hall"],
+    ["pop", "corn", "bread", "basket", "ball", "game", "show", "case", "study", "hall", "pass", "word", "play", "ground", "floor", "board", "room", "service", "dog", "house", "work", "out", "door", "bell", "pepper"],
+    ["bed", "sheet", "music", "video", "game", "over", "night", "fall", "out", "break", "down", "hill", "side", "step", "child", "care", "free", "kick", "ball", "room", "service", "dog", "food", "truck", "driver"],
+    ["fire", "alarm", "clock", "work", "bench", "mark", "up", "date", "night", "club", "house", "guest", "book", "store", "front", "page", "break", "fast", "food", "chain", "mail", "box", "office", "chair", "man"],
+    ["horse", "back", "hand", "rail", "road", "work", "day", "time", "table", "tennis", "ball", "game", "night", "club", "house", "fly", "over", "head", "phone", "book", "shelf", "life", "line", "up", "date"]
   ]
 }
