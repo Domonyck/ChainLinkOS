@@ -780,6 +780,9 @@ static void play_classic(Session *s) {
             if (inlen[p] >= LINE_MAX_LEN - 1) inlen[p] = 0;
         }
     }
+    // after the match: ask the winner to play again or exit (this also resets the round for the next one)
+    // returns false when someone left or exited, so the session ends
+    finish_or_rematch(s);
 }
 
 // run a whole Blitz match: every player has a clock, and the clock only runs on their own turn
@@ -892,6 +895,9 @@ static void play_blitz(Session *s) {
             if (inlen[p] >= LINE_MAX_LEN - 1) inlen[p] = 0;
         }
     }
+    // after the match: ask the winner to play again or exit (this also resets the round for the next one)
+    // returns false when someone left or exited, so the session ends
+    finish_or_rematch(s);
 }
 
 // ======== 8. REMATCH AND RUNNING ========
@@ -932,9 +938,5 @@ void run_session(Session *s) {
         } else {
             play_classic(s);
         }
-
-        // after the match: ask the winner to play again or exit (this also resets the round for the next one)
-        // returns false when someone left or exited, so the session ends
-        if (!finish_or_rematch(s)) return;
     }
 }
