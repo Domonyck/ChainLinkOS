@@ -277,12 +277,12 @@ static int load_chain(Session *s) {
         s->chain  = wb_get_chain(s->bank, i0, &s->chain_len);
         s->chain1 = wb_get_chain(s->bank, i1, &s->chain1_len);
     } else {
-        // Classic: both players get the same random chain
-        s->chain = wb_get_random_chain(s->bank, &s->chain_len);
-        s->chain1 = s->chain;
-        s->chain1_len = s->chain_len;
+        // Classic: each player gets a different random chain when at least two exist
+        size_t i0 = (size_t)rand() % count;
+        size_t i1 = (count >= 2) ? (i0 + 1 + (size_t)rand() % (count - 1)) % count : i0;
+        s->chain  = wb_get_chain(s->bank, i0, &s->chain_len);
+        s->chain1 = wb_get_chain(s->bank, i1, &s->chain1_len);
     }
-
     return 0;
 }
 
